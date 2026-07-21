@@ -1,20 +1,22 @@
 # MLO Study
 
-A mobile-first NMLS Mortgage Loan Originator exam prep app with three study modes, spaced-repetition flashcards, and a gamification layer to keep you motivated through a two-week cram.
+A mobile-first NMLS Mortgage Loan Originator exam prep app with AI-generated study materials, spaced-repetition flashcards, and a gamification layer.
 
 ## Features
 
+- **Add Lesson** — paste raw lesson text; Claude generates cleaned notes, flashcards, and quiz questions; review and edit before saving
 - **Learn** — browse modules/lessons with markdown rendering, mark lessons as read, prev/next navigation
-- **Flashcards** — tap-to-flip cards with a 5-box Leitner spaced-repetition system; "Got it / Review Again" buttons; cards due count
+- **Flashcards** — tap-to-flip cards with a 5-box Leitner spaced-repetition system
 - **Practice** — multiple-choice quizzes with immediate feedback and explanations; per-module or all-modules filter
 - **Gamification** — XP, levels, daily streak, 14 achievement badges, per-module mastery %, daily goal ring
-- **Auth** — magic-link (passwordless) email sign-in via Supabase; all progress syncs across devices
+- **Auth** — email + password sign-in via Supabase; all progress syncs across devices
 
 ## Tech Stack
 
 - [Next.js 16](https://nextjs.org) (App Router + TypeScript)
 - [Tailwind CSS v4](https://tailwindcss.com)
 - [Supabase](https://supabase.com) — Auth + Postgres with Row Level Security
+- [Anthropic API](https://anthropic.com) — `claude-sonnet-4-6` for content generation (server-side only)
 - Deploy target: [Vercel](https://vercel.com)
 
 ---
@@ -25,6 +27,7 @@ A mobile-first NMLS Mortgage Loan Originator exam prep app with three study mode
 
 - Node.js 18+
 - A [Supabase](https://supabase.com) project (free tier is fine)
+- An [Anthropic API key](https://console.anthropic.com)
 
 ### 2. Clone & install
 
@@ -36,13 +39,12 @@ npm install
 
 ### 3. Set up the database
 
-In the Supabase dashboard → **SQL Editor**, paste and run the contents of:
+In the Supabase dashboard → **SQL Editor**, run both migration files in order:
 
 ```
-supabase/migrations/001_initial_schema.sql
+supabase/migrations/001_initial_schema.sql   # profiles, progress, achievements
+supabase/migrations/002_user_content.sql     # user_modules, user_lessons, user_flashcards, user_quiz_questions
 ```
-
-This creates all tables, RLS policies, and the auto-profile trigger.
 
 ### 4. Configure environment variables
 
@@ -50,21 +52,26 @@ This creates all tables, RLS policies, and the auto-profile trigger.
 cp .env.local.example .env.local
 ```
 
-Edit `.env.local` and fill in your Supabase project values (found in **Project Settings → API**):
+Edit `.env.local`:
 
 ```
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 > `.env.local` is gitignored and never committed.
 
-### 5. Configure Supabase Auth
+### 5. Disable email confirmation for local dev
 
-In the Supabase dashboard → **Authentication → URL Configuration**:
+By default Supabase requires users to confirm their email before they can sign in, which means every "Create account" attempt during development triggers a confirmation email — annoying when you're iterating quickly.
 
-- **Site URL**: `http://localhost:3000`
-- **Redirect URLs**: add `http://localhost:3000/auth/callback`
+**To skip email confirmation locally:**
+
+Supabase dashboard → **Authentication → Providers → Email** → toggle off **"Confirm email"**
+
+With this off, creating an account immediately signs you in with no email sent.  
+> Re-enable it for production if you want email verification.
 
 ### 6. Run the dev server
 
@@ -72,59 +79,37 @@ In the Supabase dashboard → **Authentication → URL Configuration**:
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). You'll be prompted to sign in with a magic link.
+Open [http://localhost:3000](http://localhost:3000).
 
 ---
 
 ## Deploying to Vercel
 
-### 1. Push to GitHub
+### 1. Import into Vercel
 
-```bash
-git add .
-git commit -m "initial commit"
-git push
-```
+Go to [vercel.com/new](https://vercel.com/new) and import your GitHub repo. Framework preset: **Next.js** (auto-detected).
 
-### 2. Import into Vercel
+### 2. Add Environment Variables
 
-1. Go to [vercel.com/new](https://vercel.com/new) and import your repo
-2. Framework preset: **Next.js** (auto-detected)
-
-### 3. Add Environment Variables
-
-In Vercel → **Project Settings → Environment Variables**, add:
+In Vercel → **Project Settings → Environment Variables**:
 
 | Key | Value |
 |-----|-------|
 | `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Your Supabase anon public key |
+| `ANTHROPIC_API_KEY` | Your Anthropic API key (server-side only) |
 
-### 4. Update Supabase redirect URLs
+### 3. Configure Supabase for production
 
 In Supabase → **Authentication → URL Configuration**:
 
 - **Site URL**: `https://your-app.vercel.app`
-- **Redirect URLs**: add `https://your-app.vercel.app/auth/callback`
 
-### 5. Deploy
+> The auth callback route is no longer used (email+password doesn't need it), but setting Site URL correctly ensures Supabase session cookies work across your domain.
 
-Click **Deploy**. Vercel will build and deploy automatically on every push to main.
+### 4. Deploy
 
----
-
-## Adding New Modules
-
-All study content lives in [`/content`](/content) as static TypeScript — no database involved.
-
-1. Create `/content/mod-N.ts` following the same shape as [`/content/mod-1.ts`](/content/mod-1.ts):
-   - `module` with `id`, `title`, `description`, and `lessons[]`
-   - `flashcards[]` — each with `id`, `moduleId`, `question`, `answer`
-   - `quizQuestions[]` — each with `id`, `moduleId`, `prompt`, `choices[]`, `correctIndex`, `explanation`
-
-2. Import and add it to the `allContent` array in [`/content/index.ts`](/content/index.ts).
-
-That's it — the module will appear in all three study modes immediately.
+Click **Deploy**. Vercel rebuilds automatically on every push to main.
 
 ---
 
@@ -132,25 +117,26 @@ That's it — the module will appear in all three study modes immediately.
 
 ```
 app/
-  page.tsx                        # Home dashboard
-  sign-in/page.tsx                # Magic-link sign-in
-  auth/callback/route.ts          # Supabase auth callback
-  learn/page.tsx                  # Module list
-  learn/[moduleId]/[lessonId]/    # Lesson viewer
-  flashcards/page.tsx             # Leitner flashcard session
-  practice/page.tsx               # Multiple-choice quiz
+  page.tsx                           # Home dashboard
+  sign-in/page.tsx                   # Email + password sign-in / sign-up
+  add-lesson/page.tsx                # AI content generation flow
+  api/generate/route.ts              # Server-side Anthropic API route
+  learn/page.tsx                     # Module list
+  learn/[moduleId]/page.tsx          # Redirect to first lesson
+  learn/[moduleId]/[lessonId]/       # Lesson viewer
+  flashcards/page.tsx                # Leitner flashcard session
+  practice/page.tsx                  # Multiple-choice quiz
 
-content/                          # Static study content (types + seed data)
-components/                       # Shared UI components
-hooks/                            # Data-fetching hooks (Supabase + optimistic updates)
+components/                          # Shared UI components
+hooks/                               # Data-fetching hooks (optimistic updates)
 lib/
-  db.ts                           # Typed data-access layer (all Supabase calls)
-  gamification.ts                 # XP, levels, streaks, achievements
-  leitner.ts                      # Spaced-repetition scheduling
-  db-types.ts                     # TypeScript types for DB schema
+  db.ts                              # Typed data-access layer (all Supabase calls)
+  db-types.ts                        # TypeScript types for DB schema
+  gamification.ts                    # XP, levels, streaks, achievements
+  leitner.ts                         # Spaced-repetition scheduling
 utils/supabase/
-  client.ts                       # Browser Supabase client
-  server.ts                       # Server-side Supabase client (cookies)
-supabase/migrations/              # SQL migration files
-middleware.ts                     # Auth protection + session refresh
+  client.ts                          # Browser Supabase client
+  server.ts                          # Server-side Supabase client (cookies)
+supabase/migrations/                 # SQL migration files
+middleware.ts                        # Auth protection + session refresh
 ```
