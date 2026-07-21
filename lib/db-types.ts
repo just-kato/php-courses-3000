@@ -55,8 +55,20 @@ export type DBachievement = {
 export type UserModule = {
   id: string;
   user_id: string;
-  chapter: string;
+  number: number | null;    // e.g. 1, 2, 3 — null for pre-migration rows
+  chapter: string;          // legacy field (kept for NOT NULL constraint)
   title: string;
+  position: number;
+  created_at: string;
+};
+
+export type UserSection = {
+  id: string;
+  user_id: string;
+  module_id: string;
+  number: string;           // e.g. "1.1", "1.2"
+  title: string;
+  position: number;
   created_at: string;
 };
 
@@ -64,8 +76,9 @@ export type UserLesson = {
   id: string;
   user_id: string;
   module_id: string;
+  section_id: string | null;
   title: string;
-  chapter: string | null;       // e.g. "1.1.1.d"
+  chapter: string | null;       // full chapter number e.g. "1.1.1.a"
   notes_markdown: string;
   why_it_matters: string | null;
   sort_order: number;
@@ -76,7 +89,7 @@ export type UserFlashcard = {
   id: string;
   user_id: string;
   module_id: string;
-  lesson_id: string | null; // points to the lesson this card was generated from
+  lesson_id: string | null;
   question: string;
   answer: string;
   created_at: string;
@@ -99,18 +112,49 @@ export type UserQuizQuestion = {
 export type Scope =
   | { type: 'all' }
   | { type: 'module'; id: string }
+  | { type: 'section'; id: string }
   | { type: 'lesson'; id: string };
 
-export function scopeFromParams(lesson: string | null, module_: string | null): Scope {
-  if (lesson) return { type: 'lesson', id: lesson };
-  if (module_) return { type: 'module', id: module_ };
+export function scopeFromParams(
+  lesson: string | null,
+  section: string | null,
+  module_: string | null
+): Scope {
+  if (lesson)  return { type: 'lesson',  id: lesson };
+  if (section) return { type: 'section', id: section };
+  if (module_) return { type: 'module',  id: module_ };
   return { type: 'all' };
+}
+
+// ── Display labels ─────────────────────────────────────────────────────────────
+
+export function moduleLabel(mod: UserModule): string {
+  return mod.number != null ? `Module ${mod.number}: ${mod.title}` : mod.title;
+}
+
+export function sectionLabel(section: UserSection): string {
+  return `${section.number} ${section.title}`;
 }
 
 export function lessonLabel(lesson: UserLesson): string {
   return lesson.chapter ? `${lesson.chapter} — ${lesson.title}` : lesson.title;
 }
 
-export function moduleLabel(mod: UserModule, index: number): string {
-  return `Module ${index + 1}: ${mod.title}`;
+// ── Chapter number parser ──────────────────────────────────────────────────────
+// "1.2.3.a" → { moduleNumber: 1, sectionNumber: "1.2" }
+
+export function parseChapterNumber(chapter: string): {
+  moduleNumber: number | null;
+  sectionNumber: string | null;
+} {
+  const parts = chapter.trim().split('.');
+  const moduleNumber = parts[0] ? parseInt(parts[0], 10) : null;
+  const sectionNumber =
+    parts.length >= 2 && !isNaN(moduleNumber!)
+      ? `${parts[0]}.${parts[1]}`
+      : null;
+  return {
+    moduleNumber: isNaN(moduleNumber ?? NaN) ? null : moduleNumber,
+    sectionNumber,
+  };
 }

@@ -6,6 +6,7 @@ import type {
   LessonProgress,
   DBachievement,
   UserModule,
+  UserSection,
   UserLesson,
   UserFlashcard,
   UserQuizQuestion,
@@ -192,6 +193,8 @@ export async function getUserModules(
     .from('user_modules')
     .select('*')
     .eq('user_id', userId)
+    .order('position', { ascending: true })
+    .order('number', { ascending: true })
     .order('created_at', { ascending: true });
   if (error) { console.error('[db] getUserModules', error.message); return []; }
   return data as UserModule[];
@@ -213,15 +216,78 @@ export async function getUserModuleById(
 export async function createUserModule(
   supabase: SupabaseClient,
   userId: string,
-  module: { chapter?: string; title: string }
+  module: { number?: number; title: string; position?: number }
 ): Promise<UserModule | null> {
   const { data, error } = await supabase
     .from('user_modules')
-    .insert({ user_id: userId, chapter: module.chapter ?? '', title: module.title })
+    .insert({
+      user_id:  userId,
+      chapter:  '',
+      title:    module.title,
+      number:   module.number ?? null,
+      position: module.position ?? 0,
+    })
     .select()
     .single();
   if (error) { console.error('[db] createUserModule', error.message); return null; }
   return data as UserModule;
+}
+
+// ── User Sections ─────────────────────────────────────────────────────────────
+
+export async function getUserSections(
+  supabase: SupabaseClient,
+  userId: string,
+  moduleId?: string
+): Promise<UserSection[]> {
+  let query = supabase
+    .from('user_sections')
+    .select('*')
+    .eq('user_id', userId)
+    .order('position', { ascending: true })
+    .order('number',   { ascending: true });
+  if (moduleId) query = query.eq('module_id', moduleId);
+  const { data, error } = await query;
+  if (error) { console.error('[db] getUserSections', error.message); return []; }
+  return data as UserSection[];
+}
+
+export async function getUserSectionById(
+  supabase: SupabaseClient,
+  sectionId: string
+): Promise<UserSection | null> {
+  const { data, error } = await supabase
+    .from('user_sections')
+    .select('*')
+    .eq('id', sectionId)
+    .single();
+  if (error) { console.error('[db] getUserSectionById', error.message); return null; }
+  return data as UserSection;
+}
+
+export async function createUserSection(
+  supabase: SupabaseClient,
+  section: Omit<UserSection, 'id' | 'created_at'>
+): Promise<UserSection | null> {
+  const { data, error } = await supabase
+    .from('user_sections')
+    .insert(section)
+    .select()
+    .single();
+  if (error) { console.error('[db] createUserSection', error.message); return null; }
+  return data as UserSection;
+}
+
+export async function getSectionCountForModule(
+  supabase: SupabaseClient,
+  moduleId: string
+): Promise<number> {
+  const { count, error } = await supabase
+    .from('user_sections')
+    .select('*', { count: 'exact', head: true })
+    .eq('module_id', moduleId);
+  if (error) { console.error('[db] getSectionCountForModule', error.message); return 0; }
+  return count ?? 0;
 }
 
 // ── User Lessons ──────────────────────────────────────────────────────────────
