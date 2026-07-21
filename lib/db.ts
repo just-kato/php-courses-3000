@@ -213,11 +213,11 @@ export async function getUserModuleById(
 export async function createUserModule(
   supabase: SupabaseClient,
   userId: string,
-  module: { chapter: string; title: string }
+  module: { chapter?: string; title: string }
 ): Promise<UserModule | null> {
   const { data, error } = await supabase
     .from('user_modules')
-    .insert({ user_id: userId, ...module })
+    .insert({ user_id: userId, chapter: module.chapter ?? '', title: module.title })
     .select()
     .single();
   if (error) { console.error('[db] createUserModule', error.message); return null; }
@@ -267,6 +267,18 @@ export async function createUserLesson(
     .single();
   if (error) { console.error('[db] createUserLesson', error.message); return null; }
   return data as UserLesson;
+}
+
+export async function updateLessonWhyItMatters(
+  supabase: SupabaseClient,
+  lessonId: string,
+  whyItMatters: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('user_lessons')
+    .update({ why_it_matters: whyItMatters })
+    .eq('id', lessonId);
+  if (error) console.error('[db] updateLessonWhyItMatters', error.message);
 }
 
 export async function getLessonCountForModule(

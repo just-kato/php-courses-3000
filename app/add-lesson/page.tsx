@@ -6,6 +6,7 @@ import { createClient } from '@/utils/supabase/client';
 import { BottomNav } from '@/components/BottomNav';
 import * as db from '@/lib/db';
 import type { UserModule } from '@/lib/db-types';
+import { moduleLabel } from '@/lib/db-types';
 import type { GenerateResponse } from '@/app/api/generate/route';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -41,6 +42,7 @@ export default function AddLessonPage() {
 
   // Review state
   const [notesMarkdown, setNotesMarkdown] = useState('');
+  const [whyItMatters, setWhyItMatters] = useState('');
   const [flashcards, setFlashcards] = useState<EditableCard[]>([]);
   const [quizQuestions, setQuizQuestions] = useState<EditableQuestion[]>([]);
   const [savedLessonId, setSavedLessonId] = useState<string | null>(null);
@@ -73,6 +75,7 @@ export default function AddLessonPage() {
       if (!res.ok || json.error) throw new Error(json.error ?? 'Generation failed');
 
       setNotesMarkdown(json.notesMarkdown);
+      setWhyItMatters(json.whyItMatters ?? '');
       setFlashcards(json.flashcards.map((c) => ({ ...c, keep: true })));
       setQuizQuestions(json.quizQuestions.map((q) => ({ ...q, keep: true })));
       setStep('review');
@@ -93,7 +96,6 @@ export default function AddLessonPage() {
       let moduleId: string;
       if (selectedModuleId === 'new') {
         const mod = await db.createUserModule(supabase, userId, {
-          chapter,
           title: newModuleTitle.trim(),
         });
         if (!mod) throw new Error('Failed to create module');
@@ -110,7 +112,9 @@ export default function AddLessonPage() {
         user_id: userId,
         module_id: moduleId,
         title: lessonTitle.trim(),
+        chapter: chapter.trim() || null,
         notes_markdown: notesMarkdown,
+        why_it_matters: whyItMatters.trim() || null,
         sort_order: count,
       });
       if (!lesson) throw new Error('Failed to save lesson');
@@ -122,6 +126,7 @@ export default function AddLessonPage() {
         keptCards.map((c) => ({
           user_id: userId,
           module_id: moduleId,
+          lesson_id: lesson.id,
           question: c.question,
           answer: c.answer,
         }))
@@ -134,6 +139,7 @@ export default function AddLessonPage() {
         keptQuestions.map((q) => ({
           user_id: userId,
           module_id: moduleId,
+          lesson_id: lesson.id,
           prompt: q.prompt,
           choices: q.choices,
           correct_index: q.correctIndex,
@@ -214,8 +220,8 @@ export default function AddLessonPage() {
                 className="w-full px-3 py-2.5 rounded-md border border-rule bg-card font-sans text-sm text-ink focus:outline-none focus:border-accent transition-colors"
               >
                 <option value="new">+ Create new module</option>
-                {existingModules.map((m) => (
-                  <option key={m.id} value={m.id}>{m.chapter ? `${m.chapter} — ` : ''}{m.title}</option>
+                {existingModules.map((m, idx) => (
+                  <option key={m.id} value={m.id}>{moduleLabel(m, idx)}</option>
                 ))}
               </select>
               {selectedModuleId === 'new' && (
@@ -326,6 +332,17 @@ export default function AddLessonPage() {
                 value={notesMarkdown}
                 onChange={(e) => setNotesMarkdown(e.target.value)}
                 className="w-full px-3 py-2.5 rounded-md border border-rule bg-card font-mono text-xs text-ink leading-relaxed focus:outline-none focus:border-accent transition-colors resize-none"
+              />
+            </section>
+
+            {/* Why It Matters */}
+            <section className="space-y-3">
+              <h3 className="font-sans text-xs font-semibold uppercase tracking-wider text-ink-2">Why It Matters</h3>
+              <textarea
+                rows={8}
+                value={whyItMatters}
+                onChange={(e) => setWhyItMatters(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-md border border-accent/40 bg-accent-soft font-mono text-xs text-ink leading-relaxed focus:outline-none focus:border-accent transition-colors resize-none"
               />
             </section>
 
@@ -491,6 +508,7 @@ export default function AddLessonPage() {
                   setRawContent('');
                   setLessonTitle('');
                   setChapter('');
+                  setWhyItMatters('');
                   setError(null);
                   setSavedLessonId(null);
                   setSavedModuleId(null);

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/utils/supabase/client';
 import { BottomNav } from '@/components/BottomNav';
+import { Sidebar } from '@/components/Sidebar';
 import { CardSkeleton } from '@/components/Skeleton';
 import { computeModuleMastery } from '@/lib/gamification';
 import * as db from '@/lib/db';
@@ -18,6 +19,9 @@ export default function LearnPage() {
   const [fpMap, setFpMap] = useState<Map<string, FlashcardProgress>>(new Map());
   const [lpMap, setLpMap] = useState<Map<string, LessonProgress>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [generatingWhy, setGeneratingWhy] = useState(false);
+  const [whyProgress, setWhyProgress] = useState({ done: 0, total: 0 });
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
@@ -43,109 +47,178 @@ export default function LearnPage() {
     });
   }, [supabase]);
 
+  const allLessons = modules.flatMap((m) => m.lessons);
+  const missingWhy = allLessons.filter((l) => !l.why_it_matters);
+
+  async function handleGenerateAllWhy() {
+    if (generatingWhy || missingWhy.length === 0) return;
+    setGeneratingWhy(true);
+    setWhyProgress({ done: 0, total: missingWhy.length });
+    for (const lesson of missingWhy) {
+      try {
+        const res = await fetch('/api/generate-why', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            notesMarkdown: lesson.notes_markdown,
+            title: lesson.title,
+            chapter: lesson.chapter,
+          }),
+        });
+        const json = await res.json() as { whyItMatters?: string };
+        if (json.whyItMatters) {
+          await db.updateLessonWhyItMatters(supabase, lesson.id, json.whyItMatters);
+          const why = json.whyItMatters;
+          setModules((prev) =>
+            prev.map((m) => ({
+              ...m,
+              lessons: m.lessons.map((l) => l.id === lesson.id ? { ...l, why_it_matters: why } : l),
+            }))
+          );
+        }
+      } catch {
+        // continue with remaining lessons
+      }
+      setWhyProgress((p) => ({ ...p, done: p.done + 1 }));
+    }
+    setGeneratingWhy(false);
+  }
+
   return (
-    <div className="min-h-dvh bg-paper pb-24">
-      <header className="bg-card border-b border-rule px-5 py-3.5">
-        <h1 className="font-serif text-lg font-semibold text-ink tracking-tight">Learn</h1>
-        <p className="font-sans text-xs text-ink-2 mt-0.5">Browse modules and lessons</p>
+    <div className="h-dvh bg-paper flex flex-col">
+      <header className="bg-card border-b border-rule px-5 py-3.5 flex items-center gap-3 shrink-0">
+        <button
+          onClick={() => setSidebarOpen(true)}
+          className="md:hidden p-1.5 -ml-1.5 rounded hover:bg-paper text-ink-2 transition-colors"
+          aria-label="Open contents"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+          </svg>
+        </button>
+        <div>
+          <h1 className="font-serif text-lg font-semibold text-ink tracking-tight">Learn</h1>
+          <p className="font-sans text-xs text-ink-2 mt-0.5">Browse modules and lessons</p>
+        </div>
       </header>
 
-      <div className="max-w-lg mx-auto px-5 py-6 space-y-6">
-        {loading ? (
-          Array.from({ length: 2 }).map((_, i) => <CardSkeleton key={i} />)
-        ) : modules.length === 0 ? (
-          <EmptyState />
-        ) : (
-          modules.map((mod) => {
-            const mastery = computeModuleMastery(mod.id, allFlashcards, fpMap);
-            const readCount = mod.lessons.filter((l) => lpMap.get(l.id)?.read).length;
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar
+          modules={modules}
+          lpMap={lpMap}
+          open={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          getLessonHref={(l, m) => `/learn/${m.id}/${l.id}`}
+        />
 
-            return (
-              <div key={mod.id} className="border border-rule rounded-md bg-card overflow-hidden">
-                {/* Module header */}
-                <div className="px-4 pt-4 pb-3 border-b border-rule">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      {mod.chapter && (
-                        <p className="font-sans text-[11px] text-ink-2 mb-0.5 tabular-nums">{mod.chapter}</p>
-                      )}
-                      <h2 className="font-serif text-base font-semibold text-ink leading-snug">
-                        {mod.title}
-                      </h2>
-                    </div>
-                    <span className="font-sans text-sm tabular-nums text-ink-2 shrink-0 mt-0.5">
-                      {mastery}%
-                    </span>
-                  </div>
-                  <div className="mt-3 h-0.75 rounded-sm bg-rule">
-                    <div
-                      className="h-full bg-accent transition-all"
-                      style={{ width: `${mastery}%` }}
-                    />
-                  </div>
-                  <p className="font-sans text-[11px] text-ink-2 mt-1.5 tabular-nums">
-                    {readCount} of {mod.lessons.length} lessons read
-                  </p>
-                </div>
-
-                {/* Lessons */}
-                {mod.lessons.length > 0 && (
-                  <div className="divide-y divide-rule">
-                    {mod.lessons.map((lesson, idx) => {
-                      const read = lpMap.get(lesson.id)?.read === true;
-                      return (
-                        <Link
-                          key={lesson.id}
-                          href={`/learn/${mod.id}/${lesson.id}`}
-                          className="flex items-center gap-3 px-4 py-3 hover:bg-paper transition-colors duration-150 group"
-                        >
-                          <div
-                            className={`flex items-center justify-center w-6 h-6 rounded border text-[11px] font-sans font-semibold shrink-0 tabular-nums transition-colors ${
-                              read
-                                ? 'border-sage bg-correct text-sage'
-                                : 'border-rule text-ink-2'
-                            }`}
-                          >
-                            {read ? '✓' : idx + 1}
-                          </div>
-                          <span
-                            className={`flex-1 font-sans text-sm leading-snug ${
-                              read ? 'text-ink-2' : 'text-ink'
-                            }`}
-                          >
-                            {lesson.title}
-                          </span>
-                          <svg
-                            className="w-3.5 h-3.5 text-rule group-hover:text-ink-2 shrink-0 transition-colors"
-                            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-                          >
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                          </svg>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Quick links */}
-                <div className="px-4 py-3 flex gap-2 border-t border-rule bg-paper">
-                  <Link
-                    href={`/flashcards?module=${mod.id}`}
-                    className="flex-1 text-center py-1.5 rounded border border-rule font-sans text-xs font-medium text-ink-2 hover:border-ink-2 hover:text-ink transition-colors duration-150"
-                  >
-                    Flashcards
-                  </Link>
-                  <Link
-                    href={`/practice?module=${mod.id}`}
-                    className="flex-1 text-center py-1.5 rounded border border-rule font-sans text-xs font-medium text-ink-2 hover:border-ink-2 hover:text-ink transition-colors duration-150"
-                  >
-                    Practice Quiz
-                  </Link>
-                </div>
+        <main className="flex-1 overflow-y-auto">
+          <div className="max-w-2xl mx-auto px-5 py-6 pb-24 space-y-8">
+            {!loading && missingWhy.length > 0 && (
+              <div className="border border-accent/30 bg-accent-soft rounded-md px-4 py-3 flex items-center justify-between gap-3">
+                <p className="font-sans text-xs text-ink leading-snug">
+                  <span className="font-medium">{missingWhy.length} lesson{missingWhy.length !== 1 ? 's' : ''}</span> missing "Why It Matters"
+                </p>
+                <button
+                  onClick={handleGenerateAllWhy}
+                  disabled={generatingWhy}
+                  className="shrink-0 font-sans text-xs font-medium text-accent hover:text-ink disabled:opacity-60 transition-colors"
+                >
+                  {generatingWhy
+                    ? `Generating ${whyProgress.done}/${whyProgress.total}…`
+                    : 'Generate all'}
+                </button>
               </div>
-            );
-          })
-        )}
+            )}
+            {loading ? (
+              Array.from({ length: 2 }).map((_, i) => <CardSkeleton key={i} />)
+            ) : modules.length === 0 ? (
+              <EmptyState />
+            ) : (
+              modules.map((mod, modIdx) => {
+                const mastery = computeModuleMastery(mod.id, allFlashcards, fpMap);
+                const readCount = mod.lessons.filter((l) => lpMap.get(l.id)?.read).length;
+
+                return (
+                  <section key={mod.id}>
+                    {/* Module heading */}
+                    <div className="flex items-baseline justify-between mb-3 gap-3">
+                      <h2 className="font-serif text-base font-semibold text-ink leading-snug">
+                        Module {modIdx + 1}: {mod.title}
+                      </h2>
+                      <span className="font-sans text-xs text-ink-2 tabular-nums shrink-0">
+                        {mastery}% · {readCount}/{mod.lessons.length} read
+                      </span>
+                    </div>
+
+                    {/* Mastery bar */}
+                    <div className="h-0.75 rounded-sm bg-rule mb-4">
+                      <div className="h-full bg-accent transition-all" style={{ width: `${mastery}%` }} />
+                    </div>
+
+                    {/* Lesson cards */}
+                    {mod.lessons.length > 0 ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {mod.lessons.map((lesson) => {
+                          const read = lpMap.get(lesson.id)?.read === true;
+                          return (
+                            <div
+                              key={lesson.id}
+                              className="border border-rule rounded-md bg-card p-4 flex flex-col gap-3"
+                            >
+                              <div className="flex-1 min-w-0 space-y-1">
+                                {lesson.chapter && (
+                                  <p className="font-sans text-[10px] font-semibold uppercase tracking-wider text-ink-2/70">
+                                    {lesson.chapter}
+                                  </p>
+                                )}
+                                <p className="font-sans text-sm font-medium text-ink leading-snug">{lesson.title}</p>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-1.5">
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${read ? 'bg-sage' : 'bg-rule'}`}
+                                  />
+                                  <span className="font-sans text-[11px] text-ink-2">{read ? 'Read' : 'Not read'}</span>
+                                </div>
+                                {!lesson.why_it_matters && (
+                                  <span className="font-sans text-[10px] text-accent/70 border border-accent/30 rounded px-1 py-0.5 leading-none">
+                                    No explainer
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex gap-1.5">
+                                <Link
+                                  href={`/learn/${mod.id}/${lesson.id}`}
+                                  className="flex-1 text-center py-1.5 rounded-md bg-accent text-card font-sans text-xs font-medium hover:opacity-90 transition-opacity"
+                                >
+                                  Read
+                                </Link>
+                                <Link
+                                  href={`/flashcards?lesson=${lesson.id}`}
+                                  className="flex-1 text-center py-1.5 rounded border border-rule font-sans text-xs font-medium text-ink-2 hover:border-ink-2 hover:text-ink transition-colors"
+                                >
+                                  Cards
+                                </Link>
+                                <Link
+                                  href={`/practice?lesson=${lesson.id}`}
+                                  className="flex-1 text-center py-1.5 rounded border border-rule font-sans text-xs font-medium text-ink-2 hover:border-ink-2 hover:text-ink transition-colors"
+                                >
+                                  Quiz
+                                </Link>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="font-sans text-sm text-ink-2">No lessons yet.</p>
+                    )}
+                  </section>
+                );
+              })
+            )}
+          </div>
+        </main>
       </div>
 
       <BottomNav />
