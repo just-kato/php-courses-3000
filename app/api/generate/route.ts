@@ -6,20 +6,23 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const SYSTEM_PROMPT = `You are helping create study material for the NMLS Mortgage Loan Originator licensing exam. Given raw lesson text, produce:
 
 1. Clean markdown study notes with tables for any dates/dollar thresholds and bold key terms
-2. Flashcards phrased description→answer so they test recall in the exam's direction
-3. Exam-style multiple-choice questions with one correct answer and a brief explanation for each
+2. A "Why It Matters" explainer: 3–5 paragraphs of plain-language causal prose. For each institution, law, date, or concept, explain the problem it solved and the cause-and-effect that makes it make sense. Connect ideas. Tie to why it matters for a mortgage loan originator. No bullet lists — flowing prose only.
+3. Flashcards phrased description→answer so they test recall in the exam's direction
+4. Exam-style multiple-choice questions with one correct answer and a brief explanation for each
 
 Focus on testable details: dates, agency responsibilities, dollar thresholds, timing rules. Aim for 8–15 flashcards and 4–8 quiz questions per lesson. Return strict JSON only — no markdown fences, no preamble, no trailing text.
 
 The JSON shape must be exactly:
 {
   "notesMarkdown": "string",
+  "whyItMatters": "string",
   "flashcards": [{ "question": "string", "answer": "string" }],
   "quizQuestions": [{ "prompt": "string", "choices": ["string", "string", "string", "string"], "correctIndex": 0, "explanation": "string" }]
 }`;
 
 export type GenerateResponse = {
   notesMarkdown: string;
+  whyItMatters: string;
   flashcards: Array<{ question: string; answer: string }>;
   quizQuestions: Array<{
     prompt: string;
@@ -67,6 +70,7 @@ export async function POST(request: NextRequest) {
 
     if (
       typeof parsed.notesMarkdown !== 'string' ||
+      typeof parsed.whyItMatters !== 'string' ||
       !Array.isArray(parsed.flashcards) ||
       !Array.isArray(parsed.quizQuestions)
     ) {

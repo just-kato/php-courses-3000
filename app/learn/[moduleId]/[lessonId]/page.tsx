@@ -26,6 +26,8 @@ export default function LessonPage() {
   const [marking, setMarking] = useState(false);
   const [xpBump, setXpBump] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [whyGenerating, setWhyGenerating] = useState(false);
+  const [whyError, setWhyError] = useState<string | null>(null);
 
   const { newlyUnlocked, checkAndAward, clearNewlyUnlocked } = useAchievements(userId ?? undefined);
 
@@ -79,6 +81,30 @@ export default function LessonPage() {
     setMarking(false);
   }
 
+  async function handleGenerateWhy() {
+    if (!lesson || whyGenerating) return;
+    setWhyGenerating(true);
+    setWhyError(null);
+    try {
+      const res = await fetch('/api/generate-why', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notesMarkdown: lesson.notes_markdown,
+          title: lesson.title,
+          chapter: lesson.chapter,
+        }),
+      });
+      const json = await res.json() as { whyItMatters?: string; error?: string };
+      if (!res.ok || json.error) throw new Error(json.error ?? 'Generation failed');
+      await db.updateLessonWhyItMatters(supabase, lesson.id, json.whyItMatters!);
+      setLesson((prev) => prev ? { ...prev, why_it_matters: json.whyItMatters! } : prev);
+    } catch (err) {
+      setWhyError(err instanceof Error ? err.message : 'Generation failed. Please try again.');
+    }
+    setWhyGenerating(false);
+  }
+
   if (loading || !userId) return <HomeSkeleton />;
 
   if (!lesson || !mod) {
@@ -112,7 +138,9 @@ export default function LessonPage() {
         </button>
         <div className="flex-1 min-w-0">
           <p className="font-sans text-[11px] text-ink-2 truncate">{mod.title}</p>
-          <h1 className="font-sans text-sm font-medium text-ink truncate">{lesson.title}</h1>
+          <h1 className="font-sans text-sm font-medium text-ink truncate">
+            {lesson.chapter ? `${lesson.chapter} — ` : ''}{lesson.title}
+          </h1>
         </div>
         {isRead && (
           <span className="font-sans text-xs text-sage font-medium shrink-0">✓ Read</span>
@@ -135,6 +163,47 @@ export default function LessonPage() {
 
         <MarkdownRenderer content={lesson.notes_markdown} />
 
+        {/* Why It Matters */}
+        <div className="mt-10">
+          {lesson.why_it_matters ? (
+            <div className="border-l-[3px] border-accent bg-accent-soft rounded-r-md px-5 py-5">
+              <div className="flex items-baseline justify-between gap-3 mb-3">
+                <h2 className="font-serif text-lg font-semibold text-accent">Why It Matters</h2>
+                <button
+                  onClick={handleGenerateWhy}
+                  disabled={whyGenerating}
+                  className="font-sans text-[11px] text-accent/70 hover:text-accent transition-colors disabled:opacity-50 shrink-0"
+                >
+                  {whyGenerating ? 'Regenerating…' : 'Regenerate'}
+                </button>
+              </div>
+              <MarkdownRenderer content={lesson.why_it_matters} />
+            </div>
+          ) : (
+            <div className="border border-dashed border-accent/40 rounded-md px-5 py-5 space-y-3">
+              <h2 className="font-serif text-base font-semibold text-ink-2">Why It Matters</h2>
+              <p className="font-sans text-sm text-ink-2 leading-relaxed">
+                Get a plain-language causal explanation of what this lesson covers and why it matters for the exam.
+              </p>
+              {whyError && (
+                <p className="font-sans text-xs text-accent leading-snug">{whyError}</p>
+              )}
+              <button
+                onClick={handleGenerateWhy}
+                disabled={whyGenerating}
+                className="w-full py-2 rounded-md border border-accent/60 font-sans text-sm font-medium text-accent hover:bg-accent-soft disabled:opacity-50 transition-colors"
+              >
+                {whyGenerating ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Spinner />
+                    Generating…
+                  </span>
+                ) : 'Generate Why It Matters'}
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* End-of-lesson actions */}
         <div className="mt-10 pt-6 border-t border-rule space-y-4">
           {!isRead ? (
@@ -156,6 +225,22 @@ export default function LessonPage() {
               )}
             </div>
           )}
+
+          {/* Study this lesson */}
+          <div className="flex gap-2">
+            <Link
+              href={`/flashcards?lesson=${lesson.id}`}
+              className="flex-1 text-center py-2 rounded-md border border-rule font-sans text-xs font-medium text-ink-2 hover:border-ink-2 hover:text-ink transition-colors"
+            >
+              Study Cards
+            </Link>
+            <Link
+              href={`/practice?lesson=${lesson.id}`}
+              className="flex-1 text-center py-2 rounded-md border border-rule font-sans text-xs font-medium text-ink-2 hover:border-ink-2 hover:text-ink transition-colors"
+            >
+              Quiz
+            </Link>
+          </div>
 
           <div className="flex gap-3">
             {prevLesson ? (
@@ -190,5 +275,14 @@ export default function LessonPage() {
       <AchievementToast achievementIds={newlyUnlocked} onDismiss={clearNewlyUnlocked} />
       <BottomNav />
     </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
   );
 }
