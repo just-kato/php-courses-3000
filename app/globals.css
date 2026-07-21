@@ -1,26 +1,107 @@
 @import "tailwindcss";
 
+/* ── Color palette ── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --paper:        #FAF8F3;
+  --card:         #FFFFFF;
+  --rule:         #E8E2D6;
+  --ink:          #2B2620;
+  --ink-2:        #6B6459;
+  --accent:       #B4531F;
+  --accent-soft:  #F3E6DC;
+  --sage:         #5B7A55;
+  --correct:      #EAF0E6;
+  --wrong:        #F5E3E0;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --paper:        #1C1A17;
+    --card:         #26231F;
+    --rule:         #35312B;
+    --ink:          #EDE8DF;
+    --ink-2:        #A39C90;
+    --accent:       #D4763F;
+    --accent-soft:  #2A1E15;
+    --sage:         #7A9A74;
+    --correct:      #1A2319;
+    --wrong:        #271916;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ── Tailwind v4 theme mapping ── */
+@theme inline {
+  /* Colors */
+  --color-paper:        var(--paper);
+  --color-card:         var(--card);
+  --color-rule:         var(--rule);
+  --color-ink:          var(--ink);
+  --color-ink-2:        var(--ink-2);
+  --color-accent:       var(--accent);
+  --color-accent-soft:  var(--accent-soft);
+  --color-sage:         var(--sage);
+  --color-correct:      var(--correct);
+  --color-wrong:        var(--wrong);
+
+  /* Fonts — Next.js injects these variables on <html> */
+  --font-sans:   var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-serif:  var(--font-fraunces), ui-serif, Georgia, serif;
+
+  /* Timing */
+  --ease-calm: cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+/* ── Base ── */
+body {
+  background-color: var(--paper);
+  color: var(--ink);
+  font-feature-settings: "liga" 1, "kern" 1;
+}
+
+/* Headings default to serif */
+h1, h2, h3, h4 {
+  font-family: var(--font-fraunces), ui-serif, Georgia, serif;
+}
+
+/* ── Tabular numbers utility ── */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Safe area for mobile bottom nav ── */
+.pb-safe {
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+}
+
+/* ── Flashcard 3D flip ── */
+.card-flip-container {
+  perspective: 1200px;
+}
+
+.card-flip-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.4s ease;
+  transform-style: preserve-3d;
+}
+
+.card-flip-inner.flipped {
+  transform: rotateY(180deg);
+}
+
+.card-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  position: absolute;
+  inset: 0;
+}
+
+.card-face-back {
+  transform: rotateY(180deg);
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar        { width: 3px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: var(--rule); border-radius: 2px; }

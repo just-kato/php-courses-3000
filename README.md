@@ -1,36 +1,156 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MLO Study
 
-## Getting Started
+A mobile-first NMLS Mortgage Loan Originator exam prep app with three study modes, spaced-repetition flashcards, and a gamification layer to keep you motivated through a two-week cram.
 
-First, run the development server:
+## Features
+
+- **Learn** — browse modules/lessons with markdown rendering, mark lessons as read, prev/next navigation
+- **Flashcards** — tap-to-flip cards with a 5-box Leitner spaced-repetition system; "Got it / Review Again" buttons; cards due count
+- **Practice** — multiple-choice quizzes with immediate feedback and explanations; per-module or all-modules filter
+- **Gamification** — XP, levels, daily streak, 14 achievement badges, per-module mastery %, daily goal ring
+- **Auth** — magic-link (passwordless) email sign-in via Supabase; all progress syncs across devices
+
+## Tech Stack
+
+- [Next.js 16](https://nextjs.org) (App Router + TypeScript)
+- [Tailwind CSS v4](https://tailwindcss.com)
+- [Supabase](https://supabase.com) — Auth + Postgres with Row Level Security
+- Deploy target: [Vercel](https://vercel.com)
+
+---
+
+## Local Development
+
+### 1. Prerequisites
+
+- Node.js 18+
+- A [Supabase](https://supabase.com) project (free tier is fine)
+
+### 2. Clone & install
+
+```bash
+git clone <your-repo-url>
+cd php-courses-3000
+npm install
+```
+
+### 3. Set up the database
+
+In the Supabase dashboard → **SQL Editor**, paste and run the contents of:
+
+```
+supabase/migrations/001_initial_schema.sql
+```
+
+This creates all tables, RLS policies, and the auto-profile trigger.
+
+### 4. Configure environment variables
+
+```bash
+cp .env.local.example .env.local
+```
+
+Edit `.env.local` and fill in your Supabase project values (found in **Project Settings → API**):
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+```
+
+> `.env.local` is gitignored and never committed.
+
+### 5. Configure Supabase Auth
+
+In the Supabase dashboard → **Authentication → URL Configuration**:
+
+- **Site URL**: `http://localhost:3000`
+- **Redirect URLs**: add `http://localhost:3000/auth/callback`
+
+### 6. Run the dev server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000). You'll be prompted to sign in with a magic link.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Deploying to Vercel
 
-## Learn More
+### 1. Push to GitHub
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+git add .
+git commit -m "initial commit"
+git push
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 2. Import into Vercel
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Go to [vercel.com/new](https://vercel.com/new) and import your repo
+2. Framework preset: **Next.js** (auto-detected)
 
-## Deploy on Vercel
+### 3. Add Environment Variables
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+In Vercel → **Project Settings → Environment Variables**, add:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Key | Value |
+|-----|-------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Your Supabase anon public key |
+
+### 4. Update Supabase redirect URLs
+
+In Supabase → **Authentication → URL Configuration**:
+
+- **Site URL**: `https://your-app.vercel.app`
+- **Redirect URLs**: add `https://your-app.vercel.app/auth/callback`
+
+### 5. Deploy
+
+Click **Deploy**. Vercel will build and deploy automatically on every push to main.
+
+---
+
+## Adding New Modules
+
+All study content lives in [`/content`](/content) as static TypeScript — no database involved.
+
+1. Create `/content/mod-N.ts` following the same shape as [`/content/mod-1.ts`](/content/mod-1.ts):
+   - `module` with `id`, `title`, `description`, and `lessons[]`
+   - `flashcards[]` — each with `id`, `moduleId`, `question`, `answer`
+   - `quizQuestions[]` — each with `id`, `moduleId`, `prompt`, `choices[]`, `correctIndex`, `explanation`
+
+2. Import and add it to the `allContent` array in [`/content/index.ts`](/content/index.ts).
+
+That's it — the module will appear in all three study modes immediately.
+
+---
+
+## Project Structure
+
+```
+app/
+  page.tsx                        # Home dashboard
+  sign-in/page.tsx                # Magic-link sign-in
+  auth/callback/route.ts          # Supabase auth callback
+  learn/page.tsx                  # Module list
+  learn/[moduleId]/[lessonId]/    # Lesson viewer
+  flashcards/page.tsx             # Leitner flashcard session
+  practice/page.tsx               # Multiple-choice quiz
+
+content/                          # Static study content (types + seed data)
+components/                       # Shared UI components
+hooks/                            # Data-fetching hooks (Supabase + optimistic updates)
+lib/
+  db.ts                           # Typed data-access layer (all Supabase calls)
+  gamification.ts                 # XP, levels, streaks, achievements
+  leitner.ts                      # Spaced-repetition scheduling
+  db-types.ts                     # TypeScript types for DB schema
+utils/supabase/
+  client.ts                       # Browser Supabase client
+  server.ts                       # Server-side Supabase client (cookies)
+supabase/migrations/              # SQL migration files
+middleware.ts                     # Auth protection + session refresh
+```
