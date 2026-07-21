@@ -14,8 +14,9 @@ import { useAchievements } from '@/hooks/useAchievements';
 import { filterDueCards, shuffle } from '@/lib/leitner';
 import { XP_CARD_REVIEW, XP_CARD_CORRECT_BONUS, getLevelInfo } from '@/lib/gamification';
 import * as db from '@/lib/db';
-import type { UserModule, UserLesson, UserFlashcard, LessonProgress } from '@/lib/db-types';
-import { scopeFromParams, lessonLabel } from '@/lib/db-types';
+import type { ModuleWithSections } from '@/components/Sidebar';
+import type { UserSection, UserLesson, UserFlashcard, LessonProgress } from '@/lib/db-types';
+import { scopeFromParams, lessonLabel, sectionLabel } from '@/lib/db-types';
 
 export default function FlashcardsPage() {
   return (
@@ -28,14 +29,16 @@ export default function FlashcardsPage() {
 function FlashcardsContent() {
   const searchParams = useSearchParams();
   const lessonParam = searchParams.get('lesson');
+  const sectionParam = searchParams.get('section');
   const moduleParam = searchParams.get('module');
-  const scope = scopeFromParams(lessonParam, moduleParam);
-  const scopeKey = lessonParam ?? moduleParam ?? 'all';
+  const scope = scopeFromParams(lessonParam, sectionParam, moduleParam);
+  const scopeKey = lessonParam ?? sectionParam ?? moduleParam ?? 'all';
 
   const supabase = useMemo(() => createClient(), []);
 
   const [userId, setUserId] = useState<string | null>(null);
-  const [userModules, setUserModules] = useState<UserModule[]>([]);
+  const [modulesWithSections, setModulesWithSections] = useState<ModuleWithSections[]>([]);
+  const [allSections, setAllSections] = useState<UserSection[]>([]);
   const [allLessons, setAllLessons] = useState<UserLesson[]>([]);
   const [allFlashcards, setAllFlashcards] = useState<UserFlashcard[]>([]);
   const [lpMap, setLpMap] = useState<Map<string, LessonProgress>>(new Map());
@@ -56,16 +59,23 @@ function FlashcardsContent() {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
       setUserId(user.id);
-      const [mods, lessons, cards, lpRows] = await Promise.all([
+      const [mods, secs, lessons, cards, lpRows] = await Promise.all([
         db.getUserModules(supabase, user.id),
+        db.getUserSections(supabase, user.id),
         db.getUserLessons(supabase, user.id),
         db.getUserFlashcards(supabase, user.id),
         db.getLessonProgress(supabase, user.id),
       ]);
-      setUserModules(mods);
+      setAllSections(secs);
       setAllLessons(lessons);
       setAllFlashcards(cards);
       setLpMap(new Map(lpRows.map((r) => [r.lesson_id, r])));
+      setModulesWithSections(mods.map((m) => ({
+        ...m,
+        sections: secs
+          .filter((s) => s.module_id === m.id)
+          .map((s) => ({ ...s, lessons: lessons.filter((l) => l.section_id === s.id) })),
+      })));
       setContentLoading(false);
     });
   }, [supabase]);
@@ -76,21 +86,18 @@ function FlashcardsContent() {
     setSessionDone(false);
   }, [scopeKey]);
 
-  const modulesWithLessons = useMemo(() => {
-    const byModule = new Map<string, UserLesson[]>();
-    allLessons.forEach((l) => {
-      const arr = byModule.get(l.module_id) ?? [];
-      arr.push(l);
-      byModule.set(l.module_id, arr);
-    });
-    return userModules.map((m) => ({ ...m, lessons: byModule.get(m.id) ?? [] }));
-  }, [userModules, allLessons]);
-
   const filteredCards = useMemo(() => {
-    if (scope.type === 'module') return allFlashcards.filter((c) => c.module_id === scope.id);
+    if (scope.type === 'module') {
+      const ids = new Set(allLessons.filter((l) => l.module_id === scope.id).map((l) => l.id));
+      return allFlashcards.filter((c) => c.lesson_id != null && ids.has(c.lesson_id));
+    }
+    if (scope.type === 'section') {
+      const ids = new Set(allLessons.filter((l) => l.section_id === scope.id).map((l) => l.id));
+      return allFlashcards.filter((c) => c.lesson_id != null && ids.has(c.lesson_id));
+    }
     if (scope.type === 'lesson') return allFlashcards.filter((c) => c.lesson_id === scope.id);
     return allFlashcards;
-  }, [scope, allFlashcards]);
+  }, [scope, allFlashcards, allLessons]);
 
   const dueCards = useMemo(() => {
     if (progressMap.size === 0 && filteredCards.length > 0) return filteredCards;
@@ -98,13 +105,20 @@ function FlashcardsContent() {
   }, [filteredCards, progressMap]);
 
   const scopeLabel = useMemo(() => {
-    if (scope.type === 'module') return userModules.find((m) => m.id === scope.id)?.title ?? null;
+    if (scope.type === 'module') {
+      const m = modulesWithSections.find((m) => m.id === scope.id);
+      return m?.title ?? null;
+    }
+    if (scope.type === 'section') {
+      const s = allSections.find((s) => s.id === scope.id);
+      return s ? sectionLabel(s) : null;
+    }
     if (scope.type === 'lesson') {
       const l = allLessons.find((l) => l.id === scope.id);
       return l ? lessonLabel(l) : null;
     }
     return null;
-  }, [scope, userModules, allLessons]);
+  }, [scope, modulesWithSections, allSections, allLessons]);
 
   function startSession(useAll = false) {
     const pool = useAll ? filteredCards : dueCards;
@@ -170,13 +184,15 @@ function FlashcardsContent() {
 
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
-          modules={modulesWithLessons}
+          modules={modulesWithSections}
           lpMap={lpMap}
           activeLessonId={scope.type === 'lesson' ? scope.id : null}
+          activeSectionId={scope.type === 'section' ? scope.id : null}
           activeModuleId={scope.type === 'module' ? scope.id : null}
           open={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
           getLessonHref={(l) => `/flashcards?lesson=${l.id}`}
+          getSectionHref={(s) => `/flashcards?section=${s.id}`}
           getModuleHref={(m) => `/flashcards?module=${m.id}`}
           allHref="/flashcards"
         />

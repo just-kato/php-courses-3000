@@ -5,16 +5,16 @@ import Link from 'next/link';
 import { createClient } from '@/utils/supabase/client';
 import { BottomNav } from '@/components/BottomNav';
 import { Sidebar } from '@/components/Sidebar';
+import type { ModuleWithSections } from '@/components/Sidebar';
 import { CardSkeleton } from '@/components/Skeleton';
 import { computeModuleMastery } from '@/lib/gamification';
 import * as db from '@/lib/db';
-import type { UserModule, UserLesson, UserFlashcard, FlashcardProgress, LessonProgress } from '@/lib/db-types';
-
-type ModuleWithLessons = UserModule & { lessons: UserLesson[] };
+import type { UserFlashcard, FlashcardProgress, LessonProgress } from '@/lib/db-types';
+import { moduleLabel, sectionLabel } from '@/lib/db-types';
 
 export default function LearnPage() {
   const supabase = useMemo(() => createClient(), []);
-  const [modules, setModules] = useState<ModuleWithLessons[]>([]);
+  const [modules, setModules] = useState<ModuleWithSections[]>([]);
   const [allFlashcards, setAllFlashcards] = useState<UserFlashcard[]>([]);
   const [fpMap, setFpMap] = useState<Map<string, FlashcardProgress>>(new Map());
   const [lpMap, setLpMap] = useState<Map<string, LessonProgress>>(new Map());
@@ -26,20 +26,21 @@ export default function LearnPage() {
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
-      const [userModules, allLessons, flashcards, fpRows, lpRows] = await Promise.all([
+      const [userModules, userSections, allLessons, flashcards, fpRows, lpRows] = await Promise.all([
         db.getUserModules(supabase, user.id),
+        db.getUserSections(supabase, user.id),
         db.getUserLessons(supabase, user.id),
         db.getUserFlashcards(supabase, user.id),
         db.getFlashcardProgress(supabase, user.id),
         db.getLessonProgress(supabase, user.id),
       ]);
-      const byModule = new Map<string, UserLesson[]>();
-      allLessons.forEach((l) => {
-        const arr = byModule.get(l.module_id) ?? [];
-        arr.push(l);
-        byModule.set(l.module_id, arr);
-      });
-      setModules(userModules.map((m) => ({ ...m, lessons: byModule.get(m.id) ?? [] })));
+      const moduleTree: ModuleWithSections[] = userModules.map((m) => ({
+        ...m,
+        sections: userSections
+          .filter((s) => s.module_id === m.id)
+          .map((s) => ({ ...s, lessons: allLessons.filter((l) => l.section_id === s.id) })),
+      }));
+      setModules(moduleTree);
       setAllFlashcards(flashcards);
       setFpMap(new Map(fpRows.map((r) => [r.card_id, r])));
       setLpMap(new Map(lpRows.map((r) => [r.lesson_id, r])));
@@ -47,7 +48,10 @@ export default function LearnPage() {
     });
   }, [supabase]);
 
-  const allLessons = modules.flatMap((m) => m.lessons);
+  const allLessons = useMemo(
+    () => modules.flatMap((m) => m.sections.flatMap((s) => s.lessons)),
+    [modules]
+  );
   const missingWhy = allLessons.filter((l) => !l.why_it_matters);
 
   async function handleGenerateAllWhy() {
@@ -72,7 +76,10 @@ export default function LearnPage() {
           setModules((prev) =>
             prev.map((m) => ({
               ...m,
-              lessons: m.lessons.map((l) => l.id === lesson.id ? { ...l, why_it_matters: why } : l),
+              sections: m.sections.map((s) => ({
+                ...s,
+                lessons: s.lessons.map((l) => l.id === lesson.id ? { ...l, why_it_matters: why } : l),
+              })),
             }))
           );
         }
@@ -108,7 +115,7 @@ export default function LearnPage() {
           lpMap={lpMap}
           open={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
-          getLessonHref={(l, m) => `/learn/${m.id}/${l.id}`}
+          getLessonHref={(l, _s, m) => `/learn/${m.id}/${l.id}`}
         />
 
         <main className="flex-1 overflow-y-auto">
@@ -129,89 +136,110 @@ export default function LearnPage() {
                 </button>
               </div>
             )}
+
             {loading ? (
               Array.from({ length: 2 }).map((_, i) => <CardSkeleton key={i} />)
             ) : modules.length === 0 ? (
               <EmptyState />
             ) : (
-              modules.map((mod, modIdx) => {
+              modules.map((mod) => {
                 const mastery = computeModuleMastery(mod.id, allFlashcards, fpMap);
-                const readCount = mod.lessons.filter((l) => lpMap.get(l.id)?.read).length;
+                const allModLessons = mod.sections.flatMap((s) => s.lessons);
+                const readCount = allModLessons.filter((l) => lpMap.get(l.id)?.read).length;
 
                 return (
                   <section key={mod.id}>
-                    {/* Module heading */}
                     <div className="flex items-baseline justify-between mb-3 gap-3">
                       <h2 className="font-serif text-base font-semibold text-ink leading-snug">
-                        Module {modIdx + 1}: {mod.title}
+                        {moduleLabel(mod)}
                       </h2>
                       <span className="font-sans text-xs text-ink-2 tabular-nums shrink-0">
-                        {mastery}% · {readCount}/{mod.lessons.length} read
+                        {mastery}% · {readCount}/{allModLessons.length} read
                       </span>
                     </div>
 
-                    {/* Mastery bar */}
                     <div className="h-0.75 rounded-sm bg-rule mb-4">
                       <div className="h-full bg-accent transition-all" style={{ width: `${mastery}%` }} />
                     </div>
 
-                    {/* Lesson cards */}
-                    {mod.lessons.length > 0 ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {mod.lessons.map((lesson) => {
-                          const read = lpMap.get(lesson.id)?.read === true;
+                    {mod.sections.length > 0 ? (
+                      <div className="space-y-6">
+                        {mod.sections.map((section) => {
+                          const secRead = section.lessons.filter((l) => lpMap.get(l.id)?.read).length;
                           return (
-                            <div
-                              key={lesson.id}
-                              className="border border-rule rounded-md bg-card p-4 flex flex-col gap-3"
-                            >
-                              <div className="flex-1 min-w-0 space-y-1">
-                                {lesson.chapter && (
-                                  <p className="font-sans text-[10px] font-semibold uppercase tracking-wider text-ink-2/70">
-                                    {lesson.chapter}
-                                  </p>
-                                )}
-                                <p className="font-sans text-sm font-medium text-ink leading-snug">{lesson.title}</p>
+                            <div key={section.id}>
+                              <div className="flex items-baseline justify-between mb-3 gap-2">
+                                <h3 className="font-sans text-xs font-semibold uppercase tracking-wider text-ink-2">
+                                  {sectionLabel(section)}
+                                </h3>
+                                <span className="font-sans text-[11px] text-ink-2/60 tabular-nums shrink-0">
+                                  {secRead}/{section.lessons.length}
+                                </span>
                               </div>
-                              <div className="flex items-center gap-3">
-                                <div className="flex items-center gap-1.5">
-                                  <span
-                                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${read ? 'bg-sage' : 'bg-rule'}`}
-                                  />
-                                  <span className="font-sans text-[11px] text-ink-2">{read ? 'Read' : 'Not read'}</span>
+
+                              {section.lessons.length > 0 ? (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  {section.lessons.map((lesson) => {
+                                    const read = lpMap.get(lesson.id)?.read === true;
+                                    return (
+                                      <div
+                                        key={lesson.id}
+                                        className="border border-rule rounded-md bg-card p-4 flex flex-col gap-3"
+                                      >
+                                        <div className="flex-1 min-w-0 space-y-1">
+                                          {lesson.chapter && (
+                                            <p className="font-sans text-[10px] font-semibold uppercase tracking-wider text-ink-2/70">
+                                              {lesson.chapter}
+                                            </p>
+                                          )}
+                                          <p className="font-sans text-sm font-medium text-ink leading-snug">
+                                            {lesson.title}
+                                          </p>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                          <div className="flex items-center gap-1.5">
+                                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${read ? 'bg-sage' : 'bg-rule'}`} />
+                                            <span className="font-sans text-[11px] text-ink-2">{read ? 'Read' : 'Not read'}</span>
+                                          </div>
+                                          {!lesson.why_it_matters && (
+                                            <span className="font-sans text-[10px] text-accent/70 border border-accent/30 rounded px-1 py-0.5 leading-none">
+                                              No explainer
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="flex gap-1.5">
+                                          <Link
+                                            href={`/learn/${mod.id}/${lesson.id}`}
+                                            className="flex-1 text-center py-1.5 rounded-md bg-accent text-card font-sans text-xs font-medium hover:opacity-90 transition-opacity"
+                                          >
+                                            Read
+                                          </Link>
+                                          <Link
+                                            href={`/flashcards?lesson=${lesson.id}`}
+                                            className="flex-1 text-center py-1.5 rounded border border-rule font-sans text-xs font-medium text-ink-2 hover:border-ink-2 hover:text-ink transition-colors"
+                                          >
+                                            Cards
+                                          </Link>
+                                          <Link
+                                            href={`/practice?lesson=${lesson.id}`}
+                                            className="flex-1 text-center py-1.5 rounded border border-rule font-sans text-xs font-medium text-ink-2 hover:border-ink-2 hover:text-ink transition-colors"
+                                          >
+                                            Quiz
+                                          </Link>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
-                                {!lesson.why_it_matters && (
-                                  <span className="font-sans text-[10px] text-accent/70 border border-accent/30 rounded px-1 py-0.5 leading-none">
-                                    No explainer
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex gap-1.5">
-                                <Link
-                                  href={`/learn/${mod.id}/${lesson.id}`}
-                                  className="flex-1 text-center py-1.5 rounded-md bg-accent text-card font-sans text-xs font-medium hover:opacity-90 transition-opacity"
-                                >
-                                  Read
-                                </Link>
-                                <Link
-                                  href={`/flashcards?lesson=${lesson.id}`}
-                                  className="flex-1 text-center py-1.5 rounded border border-rule font-sans text-xs font-medium text-ink-2 hover:border-ink-2 hover:text-ink transition-colors"
-                                >
-                                  Cards
-                                </Link>
-                                <Link
-                                  href={`/practice?lesson=${lesson.id}`}
-                                  className="flex-1 text-center py-1.5 rounded border border-rule font-sans text-xs font-medium text-ink-2 hover:border-ink-2 hover:text-ink transition-colors"
-                                >
-                                  Quiz
-                                </Link>
-                              </div>
+                              ) : (
+                                <p className="font-sans text-sm text-ink-2">No lessons in this section.</p>
+                              )}
                             </div>
                           );
                         })}
                       </div>
                     ) : (
-                      <p className="font-sans text-sm text-ink-2">No lessons yet.</p>
+                      <p className="font-sans text-sm text-ink-2">No sections yet.</p>
                     )}
                   </section>
                 );
