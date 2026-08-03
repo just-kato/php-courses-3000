@@ -40,3 +40,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# database backups (keep supabase/migrations/ tracked)
+mlo_backup*.sql
+*_backup_*.sql
+
+# large source PDFs
+public/*.pdf
