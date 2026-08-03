@@ -1,4 +1,4 @@
-import type { Profile, FlashcardProgress, DBachievement } from './db-types';
+import type { Profile, DBachievement } from './db-types';
 
 // ── XP & Levels ───────────────────────────────────────────────────────────────
 
@@ -60,21 +60,6 @@ export function computeNewStreak(profile: Profile): {
   return { current_streak: newStreak, longest_streak: newLongest, last_active_date: today };
 }
 
-// ── Module Mastery ────────────────────────────────────────────────────────────
-
-export function computeModuleMastery(
-  moduleId: string,
-  allCards: { id: string; module_id: string }[],
-  progressMap: Map<string, FlashcardProgress>
-): number {
-  const cards = allCards.filter((c) => c.module_id === moduleId);
-  if (cards.length === 0) return 0;
-  const totalBoxes = cards.reduce((sum, card) => {
-    const p = progressMap.get(card.id);
-    return sum + (p ? p.leitner_box : 1);
-  }, 0);
-  return Math.round((totalBoxes / (cards.length * 5)) * 100);
-}
 
 // ── Achievements ──────────────────────────────────────────────────────────────
 

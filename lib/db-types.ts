@@ -1,4 +1,6 @@
-// TypeScript types mirroring the Supabase database schema
+// v2 TypeScript types mirroring the Supabase database schema
+
+// ── Gamification (unchanged from v1) ─────────────────────────────────────────
 
 export type Profile = {
   user_id: string;
@@ -12,37 +14,6 @@ export type Profile = {
   updated_at: string;
 };
 
-export type FlashcardProgress = {
-  id: string;
-  user_id: string;
-  card_id: string;
-  leitner_box: number;
-  last_reviewed: string | null;
-  times_correct: number;
-  times_wrong: number;
-  created_at: string;
-  updated_at: string;
-};
-
-export type QuizAttempt = {
-  id: string;
-  user_id: string;
-  question_id: string;
-  chosen_index: number;
-  is_correct: boolean;
-  answered_at: string;
-};
-
-export type LessonProgress = {
-  id: string;
-  user_id: string;
-  lesson_id: string;
-  read: boolean;
-  read_at: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
 export type DBachievement = {
   id: string;
   user_id: string;
@@ -50,111 +21,105 @@ export type DBachievement = {
   unlocked_at: string;
 };
 
-// ── User-authored content ──────────────────────────────────────────────────────
+// ── v2 Content types ──────────────────────────────────────────────────────────
 
-export type UserModule = {
-  id: string;
-  user_id: string;
-  number: number | null;    // e.g. 1, 2, 3 — null for pre-migration rows
-  chapter: string;          // legacy field (kept for NOT NULL constraint)
-  title: string;
-  position: number;
-  created_at: string;
+export type QuestionMix = {
+  factual: number;
+  scenario: number;
+  calculation: number;
 };
 
-export type UserSection = {
+export type Section = {
   id: string;
-  user_id: string;
-  module_id: string;
-  number: string;           // e.g. "1.1", "1.2"
-  title: string;
-  position: number;
-  created_at: string;
-};
-
-export type UserLesson = {
-  id: string;
-  user_id: string;
-  module_id: string;
-  section_id: string | null;
-  title: string;
-  chapter: string | null;       // full chapter number e.g. "1.1.1.a"
-  notes_markdown: string;
-  why_it_matters: string | null;
+  slug: string;
+  name: string;
+  exam_weight: number;   // 0.27 = 27% of the exam
   sort_order: number;
+  question_mix: QuestionMix;
+};
+
+// Derived status — computed from lesson fields, never stored
+export type LessonStatus = 'empty' | 'generating' | 'ready' | 'completed';
+
+export function lessonStatus(lesson: Lesson): LessonStatus {
+  if (!lesson.source_content) return 'empty';
+  if (!lesson.generated_at) return 'generating';
+  if (lesson.completed_at) return 'completed';
+  return 'ready';
+}
+
+export type Lesson = {
+  id: string;
+  section_id: string;
+  user_id: string;
+  title: string;
+  sort_order: number;
+  source_content: string;      // verbatim paste — NEVER overwritten by regeneration
+  why_it_matters: string | null;
+  generated_at: string | null; // null = generation not yet run
+  completed_at: string | null; // null = not yet marked complete
   created_at: string;
 };
 
-export type UserFlashcard = {
+export type QuestionType = 'factual' | 'scenario' | 'calculation';
+
+export type Flashcard = {
   id: string;
-  user_id: string;
-  module_id: string;
-  lesson_id: string | null;
-  question: string;
-  answer: string;
+  lesson_id: string;
+  front: string;          // description / scenario side
+  back: string;           // term / rule / number
+  source_anchor: string | null;
+  // SM-2 scheduling state
+  ease: number;
+  interval_days: number;
+  due_at: string | null;  // null = due now (new or just lapsed)
+  lapses: number;
   created_at: string;
 };
 
-export type UserQuizQuestion = {
+export type Question = {
   id: string;
-  user_id: string;
-  module_id: string;
-  lesson_id: string | null;
-  prompt: string;
-  choices: string[];
+  lesson_id: string;
+  question_type: QuestionType;
+  stem: string;
+  options: string[];
   correct_index: number;
   explanation: string;
+  source_anchor: string | null;
   created_at: string;
 };
 
-// ── Scope (shared between flashcards, practice, and sidebar) ──────────────────
+export type Attempt = {
+  id: string;
+  question_id: string;
+  user_id: string;
+  chosen_index: number;
+  correct: boolean;
+  answered_at: string;
+};
 
-export type Scope =
-  | { type: 'all' }
-  | { type: 'module'; id: string }
-  | { type: 'section'; id: string }
-  | { type: 'lesson'; id: string };
+// ── Convenience join types ────────────────────────────────────────────────────
 
-export function scopeFromParams(
-  lesson: string | null,
-  section: string | null,
-  module_: string | null
-): Scope {
-  if (lesson)  return { type: 'lesson',  id: lesson };
-  if (section) return { type: 'section', id: section };
-  if (module_) return { type: 'module',  id: module_ };
-  return { type: 'all' };
-}
+export type LessonWithCounts = Lesson & {
+  flashcard_count: number;
+  question_count: number;
+  due_count: number;        // SM-2 due cards right now
+};
 
-// ── Display labels ─────────────────────────────────────────────────────────────
+export type SectionWithLessons = Section & {
+  lessons: LessonWithCounts[];
+};
 
-export function moduleLabel(mod: UserModule): string {
-  return mod.number != null ? `Module ${mod.number}: ${mod.title}` : mod.title;
-}
+// ── Progress math ─────────────────────────────────────────────────────────────
 
-export function sectionLabel(section: UserSection): string {
-  return `${section.number} ${section.title}`;
-}
+// Estimated scored questions secured = accuracy × (exam_weight × 115)
+// 115 = total scored questions on the NMLS exam
+export const EXAM_SCORED_QUESTIONS = 115;
+export const PASS_THRESHOLD = 86; // 75% of 115
 
-export function lessonLabel(lesson: UserLesson): string {
-  return lesson.chapter ? `${lesson.chapter} — ${lesson.title}` : lesson.title;
-}
-
-// ── Chapter number parser ──────────────────────────────────────────────────────
-// "1.2.3.a" → { moduleNumber: 1, sectionNumber: "1.2" }
-
-export function parseChapterNumber(chapter: string): {
-  moduleNumber: number | null;
-  sectionNumber: string | null;
-} {
-  const parts = chapter.trim().split('.');
-  const moduleNumber = parts[0] ? parseInt(parts[0], 10) : null;
-  const sectionNumber =
-    parts.length >= 2 && !isNaN(moduleNumber!)
-      ? `${parts[0]}.${parts[1]}`
-      : null;
-  return {
-    moduleNumber: isNaN(moduleNumber ?? NaN) ? null : moduleNumber,
-    sectionNumber,
-  };
+export function estimatedScoredQuestions(
+  section: Section,
+  accuracy: number // 0-1
+): number {
+  return accuracy * section.exam_weight * EXAM_SCORED_QUESTIONS;
 }

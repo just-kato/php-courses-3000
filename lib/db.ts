@@ -1,18 +1,15 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
   Profile,
-  FlashcardProgress,
-  QuizAttempt,
-  LessonProgress,
   DBachievement,
-  UserModule,
-  UserSection,
-  UserLesson,
-  UserFlashcard,
-  UserQuizQuestion,
+  Section,
+  Lesson,
+  Flashcard,
+  Question,
+  Attempt,
 } from './db-types';
 
-// ── Profile ──────────────────────────────────────────────────────────────────
+// ── Profile ───────────────────────────────────────────────────────────────────
 
 export async function getProfile(
   supabase: SupabaseClient,
@@ -40,118 +37,6 @@ export async function upsertProfile(
     .from('profiles')
     .upsert({ user_id: userId, ...updates }, { onConflict: 'user_id' });
   if (error) console.error('[db] upsertProfile', error.message);
-}
-
-// ── Flashcard Progress ────────────────────────────────────────────────────────
-
-export async function getFlashcardProgress(
-  supabase: SupabaseClient,
-  userId: string
-): Promise<FlashcardProgress[]> {
-  const { data, error } = await supabase
-    .from('flashcard_progress')
-    .select('*')
-    .eq('user_id', userId);
-  if (error) { console.error('[db] getFlashcardProgress', error.message); return []; }
-  return data as FlashcardProgress[];
-}
-
-export async function upsertFlashcardProgress(
-  supabase: SupabaseClient,
-  userId: string,
-  cardId: string,
-  updates: Partial<Omit<FlashcardProgress, 'id' | 'user_id' | 'card_id' | 'created_at' | 'updated_at'>>
-): Promise<void> {
-  const { error } = await supabase
-    .from('flashcard_progress')
-    .upsert(
-      { user_id: userId, card_id: cardId, ...updates },
-      { onConflict: 'user_id,card_id' }
-    );
-  if (error) console.error('[db] upsertFlashcardProgress', error.message);
-}
-
-export async function getDailyCardCount(
-  supabase: SupabaseClient,
-  userId: string
-): Promise<number> {
-  const today = new Date().toISOString().slice(0, 10);
-  const { count, error } = await supabase
-    .from('flashcard_progress')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    .gte('last_reviewed', `${today}T00:00:00Z`);
-  if (error) { console.error('[db] getDailyCardCount', error.message); return 0; }
-  return count ?? 0;
-}
-
-// ── Quiz Attempts ─────────────────────────────────────────────────────────────
-
-export async function getQuizAttempts(
-  supabase: SupabaseClient,
-  userId: string
-): Promise<QuizAttempt[]> {
-  const { data, error } = await supabase
-    .from('quiz_attempts')
-    .select('*')
-    .eq('user_id', userId)
-    .order('answered_at', { ascending: false });
-  if (error) { console.error('[db] getQuizAttempts', error.message); return []; }
-  return data as QuizAttempt[];
-}
-
-export async function addQuizAttempt(
-  supabase: SupabaseClient,
-  userId: string,
-  attempt: { question_id: string; chosen_index: number; is_correct: boolean }
-): Promise<void> {
-  const { error } = await supabase
-    .from('quiz_attempts')
-    .insert({ user_id: userId, ...attempt });
-  if (error) console.error('[db] addQuizAttempt', error.message);
-}
-
-export async function getDailyQuizCount(
-  supabase: SupabaseClient,
-  userId: string
-): Promise<number> {
-  const today = new Date().toISOString().slice(0, 10);
-  const { count, error } = await supabase
-    .from('quiz_attempts')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    .gte('answered_at', `${today}T00:00:00Z`);
-  if (error) { console.error('[db] getDailyQuizCount', error.message); return 0; }
-  return count ?? 0;
-}
-
-// ── Lesson Progress ───────────────────────────────────────────────────────────
-
-export async function getLessonProgress(
-  supabase: SupabaseClient,
-  userId: string
-): Promise<LessonProgress[]> {
-  const { data, error } = await supabase
-    .from('lesson_progress')
-    .select('*')
-    .eq('user_id', userId);
-  if (error) { console.error('[db] getLessonProgress', error.message); return []; }
-  return data as LessonProgress[];
-}
-
-export async function upsertLessonProgress(
-  supabase: SupabaseClient,
-  userId: string,
-  lessonId: string,
-  read: boolean
-): Promise<void> {
-  const { error } = await supabase
-    .from('lesson_progress')
-    .upsert(
-      { user_id: userId, lesson_id: lessonId, read, read_at: read ? new Date().toISOString() : null },
-      { onConflict: 'user_id,lesson_id' }
-    );
-  if (error) console.error('[db] upsertLessonProgress', error.message);
 }
 
 // ── Achievements ──────────────────────────────────────────────────────────────
@@ -183,232 +68,255 @@ export async function addAchievement(
   if (error) console.error('[db] addAchievement', error.message);
 }
 
-// ── User Modules ──────────────────────────────────────────────────────────────
+// ── Sections ──────────────────────────────────────────────────────────────────
 
-export async function getUserModules(
-  supabase: SupabaseClient,
-  userId: string
-): Promise<UserModule[]> {
+export async function getSections(supabase: SupabaseClient): Promise<Section[]> {
   const { data, error } = await supabase
-    .from('user_modules')
+    .from('sections')
     .select('*')
-    .eq('user_id', userId)
-    .order('position', { ascending: true })
-    .order('number', { ascending: true })
-    .order('created_at', { ascending: true });
-  if (error) { console.error('[db] getUserModules', error.message); return []; }
-  return data as UserModule[];
+    .order('sort_order', { ascending: true });
+  if (error) { console.error('[db] getSections', error.message); return []; }
+  return data as Section[];
 }
 
-export async function getUserModuleById(
+export async function getSectionBySlug(
   supabase: SupabaseClient,
-  moduleId: string
-): Promise<UserModule | null> {
+  slug: string
+): Promise<Section | null> {
   const { data, error } = await supabase
-    .from('user_modules')
+    .from('sections')
     .select('*')
-    .eq('id', moduleId)
+    .eq('slug', slug)
     .single();
-  if (error) { console.error('[db] getUserModuleById', error.message); return null; }
-  return data as UserModule;
+  if (error) { console.error('[db] getSectionBySlug', error.message); return null; }
+  return data as Section;
 }
 
-export async function createUserModule(
+// ── Lessons ───────────────────────────────────────────────────────────────────
+
+export async function getLessons(
   supabase: SupabaseClient,
   userId: string,
-  module: { number?: number; title: string; position?: number }
-): Promise<UserModule | null> {
-  const { data, error } = await supabase
-    .from('user_modules')
-    .insert({
-      user_id:  userId,
-      chapter:  '',
-      title:    module.title,
-      number:   module.number ?? null,
-      position: module.position ?? 0,
-    })
-    .select()
-    .single();
-  if (error) { console.error('[db] createUserModule', error.message); return null; }
-  return data as UserModule;
-}
-
-// ── User Sections ─────────────────────────────────────────────────────────────
-
-export async function getUserSections(
-  supabase: SupabaseClient,
-  userId: string,
-  moduleId?: string
-): Promise<UserSection[]> {
+  sectionId?: string
+): Promise<Lesson[]> {
   let query = supabase
-    .from('user_sections')
-    .select('*')
-    .eq('user_id', userId)
-    .order('position', { ascending: true })
-    .order('number',   { ascending: true });
-  if (moduleId) query = query.eq('module_id', moduleId);
-  const { data, error } = await query;
-  if (error) { console.error('[db] getUserSections', error.message); return []; }
-  return data as UserSection[];
-}
-
-export async function getUserSectionById(
-  supabase: SupabaseClient,
-  sectionId: string
-): Promise<UserSection | null> {
-  const { data, error } = await supabase
-    .from('user_sections')
-    .select('*')
-    .eq('id', sectionId)
-    .single();
-  if (error) { console.error('[db] getUserSectionById', error.message); return null; }
-  return data as UserSection;
-}
-
-export async function createUserSection(
-  supabase: SupabaseClient,
-  section: Omit<UserSection, 'id' | 'created_at'>
-): Promise<UserSection | null> {
-  const { data, error } = await supabase
-    .from('user_sections')
-    .insert(section)
-    .select()
-    .single();
-  if (error) { console.error('[db] createUserSection', error.message); return null; }
-  return data as UserSection;
-}
-
-export async function getSectionCountForModule(
-  supabase: SupabaseClient,
-  moduleId: string
-): Promise<number> {
-  const { count, error } = await supabase
-    .from('user_sections')
-    .select('*', { count: 'exact', head: true })
-    .eq('module_id', moduleId);
-  if (error) { console.error('[db] getSectionCountForModule', error.message); return 0; }
-  return count ?? 0;
-}
-
-// ── User Lessons ──────────────────────────────────────────────────────────────
-
-export async function getUserLessons(
-  supabase: SupabaseClient,
-  userId: string,
-  moduleId?: string
-): Promise<UserLesson[]> {
-  let query = supabase
-    .from('user_lessons')
+    .from('lessons')
     .select('*')
     .eq('user_id', userId)
     .order('sort_order', { ascending: true })
     .order('created_at', { ascending: true });
-  if (moduleId) query = query.eq('module_id', moduleId);
+  if (sectionId) query = query.eq('section_id', sectionId);
   const { data, error } = await query;
-  if (error) { console.error('[db] getUserLessons', error.message); return []; }
-  return data as UserLesson[];
+  if (error) { console.error('[db] getLessons', error.message); return []; }
+  return data as Lesson[];
 }
 
-export async function getUserLessonById(
+export async function getLessonById(
   supabase: SupabaseClient,
   lessonId: string
-): Promise<UserLesson | null> {
+): Promise<Lesson | null> {
   const { data, error } = await supabase
-    .from('user_lessons')
+    .from('lessons')
     .select('*')
     .eq('id', lessonId)
     .single();
-  if (error) { console.error('[db] getUserLessonById', error.message); return null; }
-  return data as UserLesson;
+  if (error) { console.error('[db] getLessonById', error.message); return null; }
+  return data as Lesson;
 }
 
-export async function createUserLesson(
+export async function createLesson(
   supabase: SupabaseClient,
-  lesson: Omit<UserLesson, 'id' | 'created_at'>
-): Promise<UserLesson | null> {
+  lesson: {
+    section_id: string;
+    user_id: string;
+    title: string;
+    source_content: string;
+    sort_order?: number;
+  }
+): Promise<Lesson | null> {
   const { data, error } = await supabase
-    .from('user_lessons')
-    .insert(lesson)
+    .from('lessons')
+    .insert({ sort_order: 0, ...lesson })
     .select()
     .single();
-  if (error) { console.error('[db] createUserLesson', error.message); return null; }
-  return data as UserLesson;
+  if (error) { console.error('[db] createLesson', error.message); return null; }
+  return data as Lesson;
 }
 
-export async function updateLessonWhyItMatters(
+export async function updateLessonGenerated(
   supabase: SupabaseClient,
   lessonId: string,
-  whyItMatters: string
+  updates: { why_it_matters: string; generated_at: string }
 ): Promise<void> {
   const { error } = await supabase
-    .from('user_lessons')
-    .update({ why_it_matters: whyItMatters })
+    .from('lessons')
+    .update(updates)
     .eq('id', lessonId);
-  if (error) console.error('[db] updateLessonWhyItMatters', error.message);
+  if (error) console.error('[db] updateLessonGenerated', error.message);
 }
 
-export async function getLessonCountForModule(
+export async function markLessonComplete(
   supabase: SupabaseClient,
-  moduleId: string
+  lessonId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('lessons')
+    .update({ completed_at: new Date().toISOString() })
+    .eq('id', lessonId);
+  if (error) console.error('[db] markLessonComplete', error.message);
+}
+
+export async function getLessonCountForSection(
+  supabase: SupabaseClient,
+  userId: string,
+  sectionId: string
 ): Promise<number> {
   const { count, error } = await supabase
-    .from('user_lessons')
+    .from('lessons')
     .select('*', { count: 'exact', head: true })
-    .eq('module_id', moduleId);
-  if (error) { console.error('[db] getLessonCountForModule', error.message); return 0; }
+    .eq('user_id', userId)
+    .eq('section_id', sectionId);
+  if (error) { console.error('[db] getLessonCountForSection', error.message); return 0; }
   return count ?? 0;
 }
 
-// ── User Flashcards ───────────────────────────────────────────────────────────
+// ── Flashcards ────────────────────────────────────────────────────────────────
 
-export async function getUserFlashcards(
+export async function getFlashcards(
   supabase: SupabaseClient,
-  userId: string,
-  moduleId?: string
-): Promise<UserFlashcard[]> {
-  let query = supabase
-    .from('user_flashcards')
+  lessonId: string
+): Promise<Flashcard[]> {
+  const { data, error } = await supabase
+    .from('flashcards')
     .select('*')
-    .eq('user_id', userId)
+    .eq('lesson_id', lessonId)
     .order('created_at', { ascending: true });
-  if (moduleId) query = query.eq('module_id', moduleId);
-  const { data, error } = await query;
-  if (error) { console.error('[db] getUserFlashcards', error.message); return []; }
-  return data as UserFlashcard[];
+  if (error) { console.error('[db] getFlashcards', error.message); return []; }
+  return data as Flashcard[];
 }
 
-export async function createUserFlashcards(
+// Load all cards for a user (for global review queue), joining through lessons
+export async function getAllFlashcards(
   supabase: SupabaseClient,
-  cards: Omit<UserFlashcard, 'id' | 'created_at'>[]
+  userId: string,
+  sectionId?: string
+): Promise<Flashcard[]> {
+  // Join flashcards → lessons to filter by user_id (RLS handles auth, but we need the join for sectionId)
+  let query = supabase
+    .from('flashcards')
+    .select('*, lessons!inner(user_id, section_id)')
+    .eq('lessons.user_id', userId);
+  if (sectionId) query = query.eq('lessons.section_id', sectionId);
+  const { data, error } = await query;
+  if (error) { console.error('[db] getAllFlashcards', error.message); return []; }
+  // Strip the nested lessons join from the returned rows
+  return (data as (Flashcard & { lessons: unknown })[]).map(({ lessons: _l, ...card }) => card as Flashcard);
+}
+
+export async function insertFlashcards(
+  supabase: SupabaseClient,
+  cards: Omit<Flashcard, 'id' | 'ease' | 'interval_days' | 'due_at' | 'lapses' | 'created_at'>[]
 ): Promise<void> {
   if (cards.length === 0) return;
-  const { error } = await supabase.from('user_flashcards').insert(cards);
-  if (error) console.error('[db] createUserFlashcards', error.message);
+  const { error } = await supabase.from('flashcards').insert(cards);
+  if (error) console.error('[db] insertFlashcards', error.message);
 }
 
-// ── User Quiz Questions ───────────────────────────────────────────────────────
+export async function deleteFlashcardsForLesson(
+  supabase: SupabaseClient,
+  lessonId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('flashcards')
+    .delete()
+    .eq('lesson_id', lessonId);
+  if (error) console.error('[db] deleteFlashcardsForLesson', error.message);
+}
 
-export async function getUserQuizQuestions(
+export async function updateFlashcardSRS(
+  supabase: SupabaseClient,
+  cardId: string,
+  updates: { ease: number; interval_days: number; due_at: string; lapses: number }
+): Promise<void> {
+  const { error } = await supabase
+    .from('flashcards')
+    .update(updates)
+    .eq('id', cardId);
+  if (error) console.error('[db] updateFlashcardSRS', error.message);
+}
+
+// ── Questions ─────────────────────────────────────────────────────────────────
+
+export async function getQuestions(
+  supabase: SupabaseClient,
+  lessonId: string
+): Promise<Question[]> {
+  const { data, error } = await supabase
+    .from('questions')
+    .select('*')
+    .eq('lesson_id', lessonId)
+    .order('created_at', { ascending: true });
+  if (error) { console.error('[db] getQuestions', error.message); return []; }
+  return data as Question[];
+}
+
+export async function getAllQuestions(
   supabase: SupabaseClient,
   userId: string,
-  moduleId?: string
-): Promise<UserQuizQuestion[]> {
+  sectionId?: string
+): Promise<Question[]> {
   let query = supabase
-    .from('user_quiz_questions')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true });
-  if (moduleId) query = query.eq('module_id', moduleId);
+    .from('questions')
+    .select('*, lessons!inner(user_id, section_id)')
+    .eq('lessons.user_id', userId);
+  if (sectionId) query = query.eq('lessons.section_id', sectionId);
   const { data, error } = await query;
-  if (error) { console.error('[db] getUserQuizQuestions', error.message); return []; }
-  return data as UserQuizQuestion[];
+  if (error) { console.error('[db] getAllQuestions', error.message); return []; }
+  return (data as (Question & { lessons: unknown })[]).map(({ lessons: _l, ...q }) => q as Question);
 }
 
-export async function createUserQuizQuestions(
+export async function insertQuestions(
   supabase: SupabaseClient,
-  questions: Omit<UserQuizQuestion, 'id' | 'created_at'>[]
+  questions: Omit<Question, 'id' | 'created_at'>[]
 ): Promise<void> {
   if (questions.length === 0) return;
-  const { error } = await supabase.from('user_quiz_questions').insert(questions);
-  if (error) console.error('[db] createUserQuizQuestions', error.message);
+  const { error } = await supabase.from('questions').insert(questions);
+  if (error) console.error('[db] insertQuestions', error.message);
+}
+
+export async function deleteQuestionsForLesson(
+  supabase: SupabaseClient,
+  lessonId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('questions')
+    .delete()
+    .eq('lesson_id', lessonId);
+  if (error) console.error('[db] deleteQuestionsForLesson', error.message);
+}
+
+// ── Attempts ──────────────────────────────────────────────────────────────────
+
+export async function recordAttempt(
+  supabase: SupabaseClient,
+  attempt: Omit<Attempt, 'id' | 'answered_at'>
+): Promise<void> {
+  const { error } = await supabase.from('attempts').insert(attempt);
+  if (error) console.error('[db] recordAttempt', error.message);
+}
+
+export async function getAttempts(
+  supabase: SupabaseClient,
+  userId: string,
+  since?: Date
+): Promise<Attempt[]> {
+  let query = supabase
+    .from('attempts')
+    .select('*')
+    .eq('user_id', userId)
+    .order('answered_at', { ascending: false });
+  if (since) query = query.gte('answered_at', since.toISOString());
+  const { data, error } = await query;
+  if (error) { console.error('[db] getAttempts', error.message); return []; }
+  return data as Attempt[];
 }
