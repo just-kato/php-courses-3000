@@ -4,58 +4,80 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/utils/supabase/client';
 import { BottomNav } from '@/components/BottomNav';
-import { ProgressRing } from '@/components/ProgressRing';
-import { HomeSkeleton } from '@/components/Skeleton';
-import { getLevelInfo, ACHIEVEMENTS, computeModuleMastery } from '@/lib/gamification';
+import { getLevelInfo, ACHIEVEMENTS } from '@/lib/gamification';
 import * as db from '@/lib/db';
-import type {
-  Profile,
-  FlashcardProgress,
-  DBachievement,
-  UserModule,
-  UserFlashcard,
-} from '@/lib/db-types';
+import { lessonStatus, EXAM_SCORED_QUESTIONS, PASS_THRESHOLD, estimatedScoredQuestions } from '@/lib/db-types';
+import { filterDue } from '@/lib/srs';
+import type { Profile, Section, Lesson, Flashcard, Attempt, DBachievement } from '@/lib/db-types';
+
+type SectionStats = {
+  section: Section;
+  lessons: Lesson[];
+  dueCount: number;
+  accuracy: number; // 0-1, from recent attempts
+  estimatedScore: number;
+};
 
 type DashData = {
   profile: Profile;
-  userModules: UserModule[];
-  userFlashcards: UserFlashcard[];
-  flashcardProgress: Map<string, FlashcardProgress>;
   achievements: DBachievement[];
-  dailyCardCount: number;
-  dailyQuizCount: number;
-  readCount: number;
+  sectionStats: SectionStats[];
+  totalDue: number;
 };
 
 export default function HomePage() {
-  const [data, setData] = useState<DashData | null>(null);
   const supabase = useMemo(() => createClient(), []);
+  const [data, setData] = useState<DashData | null>(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
-      const [profile, userModules, userFlashcards, fpRows, achievements, dailyCardCount, dailyQuizCount, lessonRows] =
+
+      const [profile, sections, allLessons, allCards, recentAttempts, achievements] =
         await Promise.all([
           db.getProfile(supabase, user.id),
-          db.getUserModules(supabase, user.id),
-          db.getUserFlashcards(supabase, user.id),
-          db.getFlashcardProgress(supabase, user.id),
+          db.getSections(supabase),
+          db.getLessons(supabase, user.id),
+          db.getAllFlashcards(supabase, user.id),
+          db.getAttempts(supabase, user.id, new Date(Date.now() - 30 * 86400000)),
           db.getUserAchievements(supabase, user.id),
-          db.getDailyCardCount(supabase, user.id),
-          db.getDailyQuizCount(supabase, user.id),
-          db.getLessonProgress(supabase, user.id),
         ]);
+
       if (!profile) return;
-      setData({
-        profile,
-        userModules,
-        userFlashcards,
-        flashcardProgress: new Map(fpRows.map((r) => [r.card_id, r])),
-        achievements,
-        dailyCardCount,
-        dailyQuizCount,
-        readCount: lessonRows.filter((r) => r.read).length,
+
+      // Build per-section stats
+      const lessonsBySection = new Map<string, Lesson[]>();
+      allLessons.forEach((l) => {
+        const arr = lessonsBySection.get(l.section_id) ?? [];
+        arr.push(l);
+        lessonsBySection.set(l.section_id, arr);
       });
+
+      const cardsByLesson = new Map<string, Flashcard[]>();
+      allCards.forEach((c) => {
+        const arr = cardsByLesson.get(c.lesson_id) ?? [];
+        arr.push(c);
+        cardsByLesson.set(c.lesson_id, arr);
+      });
+
+      // Attempts grouped by question → lesson → section requires more joins;
+      // use global accuracy for now (all recent attempts)
+      const globalAccuracy =
+        recentAttempts.length > 0
+          ? recentAttempts.filter((a: Attempt) => a.correct).length / recentAttempts.length
+          : 0;
+
+      const sectionStats: SectionStats[] = sections.map((section) => {
+        const lessons = lessonsBySection.get(section.id) ?? [];
+        const sectionCards = lessons.flatMap((l) => cardsByLesson.get(l.id) ?? []);
+        const dueCount = filterDue(sectionCards).length;
+        const estimatedScore = estimatedScoredQuestions(section, globalAccuracy);
+        return { section, lessons, dueCount, accuracy: globalAccuracy, estimatedScore };
+      });
+
+      const totalDue = filterDue(allCards).length;
+
+      setData({ profile, achievements, sectionStats, totalDue });
     });
   }, [supabase]);
 
@@ -64,23 +86,33 @@ export default function HomePage() {
     window.location.href = '/sign-in';
   }
 
-  if (!data) return <HomeSkeleton />;
+  if (!data) {
+    return (
+      <div className="min-h-dvh bg-paper pb-28">
+        <div className="max-w-lg mx-auto px-5 py-8 space-y-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="h-20 animate-pulse rounded-md bg-rule opacity-30" />
+          ))}
+        </div>
+        <BottomNav />
+      </div>
+    );
+  }
 
-  const { profile, userModules, userFlashcards, flashcardProgress, achievements, dailyCardCount, dailyQuizCount, readCount } = data;
+  const { profile, achievements, sectionStats, totalDue } = data;
   const { level, xpInLevel, xpForNextLevel, progress: xpProgress } = getLevelInfo(profile.xp);
-  const dailyTotal = dailyCardCount + dailyQuizCount;
-  const dailyProgress = Math.min(dailyTotal / profile.daily_goal, 1);
   const earnedIds = new Set(achievements.map((a) => a.achievement_id));
 
-  return (
-    <div className="min-h-dvh bg-paper pb-24">
+  const totalEstimated = sectionStats.reduce((s, ss) => s + ss.estimatedScore, 0);
+  const overallProgress = Math.min(totalEstimated / PASS_THRESHOLD, 1);
 
-      {/* Header */}
+  return (
+    <div className="min-h-dvh bg-paper pb-28">
       <header className="bg-card border-b border-rule px-5 py-3.5 flex items-center justify-between">
         <h1 className="font-serif text-lg font-semibold text-ink tracking-tight">MLO Study</h1>
         <button
           onClick={handleSignOut}
-          className="font-sans text-xs text-ink-2 hover:text-ink transition-colors duration-150"
+          className="font-sans text-xs text-ink-2 hover:text-ink transition-colors"
         >
           Sign out
         </button>
@@ -88,148 +120,117 @@ export default function HomePage() {
 
       <div className="max-w-lg mx-auto px-5 py-6 space-y-6">
 
-        {/* Streak + Level + XP */}
-        <div className="space-y-4">
-          <div className="flex items-start gap-8">
-            <div>
-              <div className="font-sans tabular-nums text-3xl font-semibold text-ink leading-none">
-                {profile.current_streak}
-              </div>
-              <div className="font-sans text-xs text-ink-2 mt-1">
-                day streak {profile.current_streak > 0 ? '🔥' : ''}
-              </div>
-              {profile.longest_streak > 0 && (
-                <div className="font-sans text-[11px] text-ink-2 opacity-60 mt-0.5 tabular-nums">
-                  best: {profile.longest_streak}
-                </div>
-              )}
+        {/* Streak + Level */}
+        <div className="flex items-start gap-6">
+          <div className="shrink-0">
+            <div className="font-sans tabular-nums text-3xl font-semibold text-ink leading-none">
+              {profile.current_streak}
             </div>
-
-            <div className="w-px self-stretch bg-rule" />
-
-            <div className="flex-1 space-y-2">
-              <div className="flex items-baseline justify-between">
-                <span className="font-sans font-semibold text-ink tabular-nums">Level {level}</span>
-                <span className="font-sans text-xs text-ink-2 tabular-nums">{profile.xp.toLocaleString()} XP</span>
-              </div>
-              <div className="h-0.75 rounded-sm bg-rule overflow-hidden">
-                <div
-                  className="h-full bg-accent transition-all duration-500"
-                  style={{ width: `${xpProgress * 100}%` }}
-                />
-              </div>
-              <p className="font-sans text-xs text-ink-2 tabular-nums">
-                {xpInLevel} / {xpForNextLevel} to next level
-              </p>
+            <div className="font-sans text-xs text-ink-2 mt-1">
+              day streak{profile.current_streak > 0 ? ' 🔥' : ''}
             </div>
           </div>
-        </div>
-
-        <div className="border-t border-rule" />
-
-        {/* Daily goal */}
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex-1 space-y-2">
+          <div className="w-px self-stretch bg-rule" />
+          <div className="flex-1 space-y-1.5">
             <div className="flex items-baseline justify-between">
-              <span className="font-sans text-sm font-medium text-ink">Today's goal</span>
-              <span className="font-sans text-xs text-ink-2 tabular-nums">
-                {dailyTotal} / {profile.daily_goal}
-              </span>
+              <span className="font-sans font-semibold text-ink">Level {level}</span>
+              <span className="font-sans text-xs text-ink-2 tabular-nums">{profile.xp.toLocaleString()} XP</span>
             </div>
             <div className="h-0.75 rounded-sm bg-rule overflow-hidden">
-              <div
-                className="h-full bg-accent transition-all duration-500"
-                style={{ width: `${dailyProgress * 100}%` }}
-              />
+              <div className="h-full bg-accent transition-all duration-500" style={{ width: `${xpProgress * 100}%` }} />
             </div>
-            <p className="font-sans text-xs text-ink-2">
-              {dailyCardCount} cards · {dailyQuizCount} questions
+            <p className="font-sans text-[11px] text-ink-2 tabular-nums">
+              {xpInLevel} / {xpForNextLevel} to next level
             </p>
           </div>
-          <ProgressRing progress={dailyProgress} size={60} strokeWidth={4}>
-            <span className="font-sans text-xs font-semibold text-ink tabular-nums">
-              {Math.round(dailyProgress * 100)}%
-            </span>
-          </ProgressRing>
         </div>
 
-        <div className="border-t border-rule" />
-
-        {/* Modules */}
-        {userModules.length > 0 ? (
-          <div className="space-y-3">
-            <h2 className="font-serif text-base font-semibold text-ink">Modules</h2>
-            {userModules.map((mod) => {
-              const mastery = computeModuleMastery(mod.id, userFlashcards, flashcardProgress);
-              const cardCount = userFlashcards.filter((c) => c.module_id === mod.id).length;
-              const started = userFlashcards.filter(
-                (c) => c.module_id === mod.id && flashcardProgress.has(c.id)
-              ).length;
-
-              return (
-                <Link
-                  key={mod.id}
-                  href={`/learn/${mod.id}`}
-                  className="block border border-rule rounded-md bg-card p-4 hover:border-ink-2 transition-colors duration-150"
-                >
-                  <div className="flex items-start justify-between gap-3 mb-3">
-                    <div>
-                      {mod.chapter && (
-                        <p className="font-sans text-[11px] text-ink-2 mb-0.5">{mod.chapter}</p>
-                      )}
-                      <h3 className="font-serif text-base font-medium text-ink leading-snug">{mod.title}</h3>
-                    </div>
-                    <span className="font-sans text-sm tabular-nums text-ink-2 shrink-0">{mastery}%</span>
-                  </div>
-                  <div className="h-0.75 rounded-sm bg-rule mb-2">
-                    <div
-                      className="h-full bg-accent transition-all"
-                      style={{ width: `${mastery}%` }}
-                    />
-                  </div>
-                  <p className="font-sans text-xs text-ink-2 tabular-nums">
-                    {started}/{cardCount} cards · {mastery}% mastery
-                  </p>
-                </Link>
-              );
-            })}
+        {/* Exam progress */}
+        <div className="border border-rule rounded-md bg-card px-4 py-4 space-y-3">
+          <div className="flex items-baseline justify-between">
+            <span className="font-sans text-sm font-semibold text-ink">Estimated exam score</span>
+            <span className="font-sans text-sm tabular-nums text-ink-2">
+              {totalEstimated.toFixed(1)} / {PASS_THRESHOLD} to pass
+            </span>
           </div>
-        ) : (
-          <div className="space-y-3">
-            <h2 className="font-serif text-base font-semibold text-ink">Get started</h2>
-            <Link
-              href="/add-lesson"
-              className="block border border-rule rounded-md bg-card p-5 hover:border-ink-2 transition-colors duration-150 text-center"
-            >
-              <p className="font-sans text-sm font-medium text-ink mb-1">Add your first lesson</p>
-              <p className="font-sans text-xs text-ink-2">Paste raw content and AI generates everything</p>
-            </Link>
+          <div className="h-1.5 rounded-sm bg-rule overflow-hidden">
+            <div
+              className="h-full bg-accent transition-all duration-500"
+              style={{ width: `${overallProgress * 100}%` }}
+            />
           </div>
+          <p className="font-sans text-[11px] text-ink-2">
+            Based on accuracy across {EXAM_SCORED_QUESTIONS} scored questions · weighted by section
+          </p>
+        </div>
+
+        {/* Due cards */}
+        {totalDue > 0 && (
+          <Link
+            href="/review"
+            className="flex items-center justify-between border border-rule rounded-md bg-card px-4 py-3.5 hover:border-accent transition-colors group"
+          >
+            <div>
+              <p className="font-sans text-sm font-semibold text-ink">
+                {totalDue} card{totalDue !== 1 ? 's' : ''} due
+              </p>
+              <p className="font-sans text-[11px] text-ink-2 mt-0.5">Tap to review now</p>
+            </div>
+            <span className="font-sans text-xs text-ink-2 group-hover:text-accent transition-colors">→</span>
+          </Link>
         )}
 
         <div className="border-t border-rule" />
 
-        {/* Quick study */}
+        {/* Sections */}
         <div className="space-y-3">
-          <h2 className="font-serif text-base font-semibold text-ink">Study now</h2>
-          <div className="grid grid-cols-2 gap-3">
-            <Link
-              href="/flashcards"
-              className="flex flex-col gap-1.5 px-4 py-3.5 rounded-md border border-rule bg-card hover:border-ink-2 transition-colors duration-150 active:scale-[0.99]"
-            >
-              <span className="text-lg">🃏</span>
-              <span className="font-sans text-sm font-medium text-ink">Flashcards</span>
-              <span className="font-sans text-xs text-ink-2">Leitner review</span>
-            </Link>
-            <Link
-              href="/practice"
-              className="flex flex-col gap-1.5 px-4 py-3.5 rounded-md border border-rule bg-card hover:border-ink-2 transition-colors duration-150 active:scale-[0.99]"
-            >
-              <span className="text-lg">📝</span>
-              <span className="font-sans text-sm font-medium text-ink">Practice Quiz</span>
-              <span className="font-sans text-xs text-ink-2">Multiple choice</span>
-            </Link>
-          </div>
+          <h2 className="font-serif text-base font-semibold text-ink">Sections</h2>
+          {sectionStats.map(({ section, lessons, dueCount, estimatedScore }) => {
+            const completedLessons = lessons.filter((l) => l.completed_at).length;
+            const readyLessons = lessons.filter((l) => lessonStatus(l) === 'ready' || l.completed_at).length;
+            const sectionProgress = lessons.length > 0 ? completedLessons / lessons.length : 0;
+
+            return (
+              <Link
+                key={section.id}
+                href={`/sections/${section.slug}`}
+                className="block border border-rule rounded-md bg-card p-4 hover:border-ink-2 transition-colors duration-150 group"
+              >
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-sans text-[10px] font-semibold uppercase tracking-wider text-ink-2 mb-0.5">
+                      {Math.round(section.exam_weight * 100)}% of exam
+                    </p>
+                    <h3 className="font-serif text-sm font-semibold text-ink leading-snug group-hover:text-accent transition-colors">
+                      {section.name}
+                    </h3>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="font-sans tabular-nums text-sm font-semibold text-ink">
+                      {estimatedScore.toFixed(1)}
+                    </p>
+                    <p className="font-sans text-[10px] text-ink-2">est. pts</p>
+                  </div>
+                </div>
+
+                <div className="h-0.75 rounded-sm bg-rule mb-2">
+                  <div className="h-full bg-accent transition-all" style={{ width: `${sectionProgress * 100}%` }} />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <p className="font-sans text-[11px] text-ink-2 tabular-nums">
+                    {completedLessons}/{lessons.length} lessons complete
+                    {readyLessons > completedLessons ? ` · ${readyLessons - completedLessons} ready` : ''}
+                  </p>
+                  {dueCount > 0 && (
+                    <p className="font-sans text-[11px] text-accent tabular-nums">
+                      {dueCount} due
+                    </p>
+                  )}
+                </div>
+              </Link>
+            );
+          })}
         </div>
 
         <div className="border-t border-rule" />
@@ -250,9 +251,7 @@ export default function HomePage() {
                   key={a.id}
                   title={`${a.title}: ${a.description}`}
                   className={`flex flex-col items-center gap-1 p-2 rounded-md border text-center transition-colors ${
-                    earned
-                      ? 'border-rule bg-card text-ink'
-                      : 'border-rule/50 bg-paper text-ink-2 opacity-30'
+                    earned ? 'border-rule bg-card' : 'border-rule/40 bg-paper opacity-25'
                   }`}
                 >
                   <span className="text-xl leading-none">{a.icon}</span>
@@ -261,22 +260,6 @@ export default function HomePage() {
               );
             })}
           </div>
-        </div>
-
-        <div className="border-t border-rule" />
-
-        {/* Stats footer */}
-        <div className="grid grid-cols-3 gap-4 text-center">
-          {[
-            { value: flashcardProgress.size, label: 'Cards touched' },
-            { value: readCount, label: 'Lessons read' },
-            { value: userFlashcards.length, label: 'Total cards' },
-          ].map(({ value, label }) => (
-            <div key={label}>
-              <div className="font-sans tabular-nums text-2xl font-semibold text-ink">{value}</div>
-              <div className="font-sans text-[11px] text-ink-2 mt-0.5 leading-tight">{label}</div>
-            </div>
-          ))}
         </div>
       </div>
 
