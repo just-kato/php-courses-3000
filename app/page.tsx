@@ -14,7 +14,7 @@ type SectionStats = {
   section: Section;
   lessons: Lesson[];
   dueCount: number;
-  accuracy: number; // 0-1, from recent attempts
+  accuracy: number;
   estimatedScore: number;
 };
 
@@ -45,7 +45,6 @@ export default function HomePage() {
 
       if (!profile) return;
 
-      // Build per-section stats
       const lessonsBySection = new Map<string, Lesson[]>();
       allLessons.forEach((l) => {
         const arr = lessonsBySection.get(l.section_id) ?? [];
@@ -60,8 +59,6 @@ export default function HomePage() {
         cardsByLesson.set(c.lesson_id, arr);
       });
 
-      // Attempts grouped by question → lesson → section requires more joins;
-      // use global accuracy for now (all recent attempts)
       const globalAccuracy =
         recentAttempts.length > 0
           ? recentAttempts.filter((a: Attempt) => a.correct).length / recentAttempts.length
@@ -76,7 +73,6 @@ export default function HomePage() {
       });
 
       const totalDue = filterDue(allCards).length;
-
       setData({ profile, achievements, sectionStats, totalDue });
     });
   }, [supabase]);
@@ -109,10 +105,10 @@ export default function HomePage() {
   return (
     <div className="min-h-dvh bg-paper pb-28">
       <header className="bg-card border-b border-rule px-5 py-3.5 flex items-center justify-between">
-        <h1 className="font-serif text-lg font-semibold text-ink tracking-tight">MLO Study</h1>
+        <h1 className="font-serif text-lg font-medium text-ink">MLO Study</h1>
         <button
           onClick={handleSignOut}
-          className="font-sans text-xs text-ink-2 hover:text-ink transition-colors"
+          className="font-sans text-[12px] text-ink-2 hover:text-ink transition-colors"
         >
           Sign out
         </button>
@@ -123,20 +119,20 @@ export default function HomePage() {
         {/* Streak + Level */}
         <div className="flex items-start gap-6">
           <div className="shrink-0">
-            <div className="font-sans tabular-nums text-3xl font-semibold text-ink leading-none">
+            <div className="font-sans tabular-nums text-3xl font-medium text-ink leading-none">
               {profile.current_streak}
             </div>
-            <div className="font-sans text-xs text-ink-2 mt-1">
+            <div className="font-sans text-[12px] text-ink-2 mt-1">
               day streak{profile.current_streak > 0 ? ' 🔥' : ''}
             </div>
           </div>
           <div className="w-px self-stretch bg-rule" />
           <div className="flex-1 space-y-1.5">
             <div className="flex items-baseline justify-between">
-              <span className="font-sans font-semibold text-ink">Level {level}</span>
-              <span className="font-sans text-xs text-ink-2 tabular-nums">{profile.xp.toLocaleString()} XP</span>
+              <span className="font-sans font-medium text-ink">Level {level}</span>
+              <span className="font-sans text-[12px] text-ink-2 tabular-nums">{profile.xp.toLocaleString()} XP</span>
             </div>
-            <div className="h-0.75 rounded-sm bg-rule overflow-hidden">
+            <div className="h-1 rounded-sm bg-rule overflow-hidden">
               <div className="h-full bg-accent transition-all duration-500" style={{ width: `${xpProgress * 100}%` }} />
             </div>
             <p className="font-sans text-[11px] text-ink-2 tabular-nums">
@@ -146,10 +142,10 @@ export default function HomePage() {
         </div>
 
         {/* Exam progress */}
-        <div className="border border-rule rounded-md bg-card px-4 py-4 space-y-3">
+        <div className="rounded-md border border-rule bg-card px-4 py-4 space-y-3">
           <div className="flex items-baseline justify-between">
-            <span className="font-sans text-sm font-semibold text-ink">Estimated exam score</span>
-            <span className="font-sans text-sm tabular-nums text-ink-2">
+            <span className="font-sans text-[15px] font-medium text-ink">Estimated exam score</span>
+            <span className="font-sans text-[13px] tabular-nums text-ink-2">
               {totalEstimated.toFixed(1)} / {PASS_THRESHOLD} to pass
             </span>
           </div>
@@ -159,7 +155,7 @@ export default function HomePage() {
               style={{ width: `${overallProgress * 100}%` }}
             />
           </div>
-          <p className="font-sans text-[11px] text-ink-2">
+          <p className="font-sans text-[12px] text-ink-2">
             Based on accuracy across {EXAM_SCORED_QUESTIONS} scored questions · weighted by section
           </p>
         </div>
@@ -168,15 +164,15 @@ export default function HomePage() {
         {totalDue > 0 && (
           <Link
             href="/review"
-            className="flex items-center justify-between border border-rule rounded-md bg-card px-4 py-3.5 hover:border-accent transition-colors group"
+            className="flex items-center justify-between rounded-md border border-rule bg-card px-4 py-3.5 hover:border-accent transition-colors group"
           >
             <div>
-              <p className="font-sans text-sm font-semibold text-ink">
+              <p className="font-sans text-[15px] font-medium text-ink">
                 {totalDue} card{totalDue !== 1 ? 's' : ''} due
               </p>
-              <p className="font-sans text-[11px] text-ink-2 mt-0.5">Tap to review now</p>
+              <p className="font-sans text-[12px] text-ink-2 mt-0.5">Tap to review now</p>
             </div>
-            <span className="font-sans text-xs text-ink-2 group-hover:text-accent transition-colors">→</span>
+            <span className="font-sans text-[13px] text-accent group-hover:text-accent-deep transition-colors">→</span>
           </Link>
         )}
 
@@ -184,7 +180,7 @@ export default function HomePage() {
 
         {/* Sections */}
         <div className="space-y-3">
-          <h2 className="font-serif text-base font-semibold text-ink">Sections</h2>
+          <h2 className="font-serif text-base font-medium text-ink">Sections</h2>
           {sectionStats.map(({ section, lessons, dueCount, estimatedScore }) => {
             const completedLessons = lessons.filter((l) => l.completed_at).length;
             const readyLessons = lessons.filter((l) => lessonStatus(l) === 'ready' || l.completed_at).length;
@@ -194,36 +190,36 @@ export default function HomePage() {
               <Link
                 key={section.id}
                 href={`/sections/${section.slug}`}
-                className="block border border-rule rounded-md bg-card p-4 hover:border-ink-2 transition-colors duration-150 group"
+                className="block rounded-md border border-rule bg-card p-4 hover:border-ink-2 transition-colors group"
               >
                 <div className="flex items-start justify-between gap-3 mb-2">
                   <div className="flex-1 min-w-0">
-                    <p className="font-sans text-[10px] font-semibold uppercase tracking-wider text-ink-2 mb-0.5">
+                    <p className="font-sans text-[11px] text-ink-2 mb-0.5">
                       {Math.round(section.exam_weight * 100)}% of exam
                     </p>
-                    <h3 className="font-serif text-sm font-semibold text-ink leading-snug group-hover:text-accent transition-colors">
+                    <h3 className="font-serif text-[15px] font-medium text-ink leading-snug group-hover:text-accent transition-colors">
                       {section.name}
                     </h3>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className="font-sans tabular-nums text-sm font-semibold text-ink">
+                    <p className="font-sans tabular-nums text-[15px] font-medium text-ink">
                       {estimatedScore.toFixed(1)}
                     </p>
-                    <p className="font-sans text-[10px] text-ink-2">est. pts</p>
+                    <p className="font-sans text-[11px] text-ink-2">est. pts</p>
                   </div>
                 </div>
 
-                <div className="h-0.75 rounded-sm bg-rule mb-2">
+                <div className="h-1 rounded-sm bg-rule mb-2">
                   <div className="h-full bg-accent transition-all" style={{ width: `${sectionProgress * 100}%` }} />
                 </div>
 
                 <div className="flex items-center justify-between">
-                  <p className="font-sans text-[11px] text-ink-2 tabular-nums">
+                  <p className="font-sans text-[12px] text-ink-2 tabular-nums">
                     {completedLessons}/{lessons.length} lessons complete
                     {readyLessons > completedLessons ? ` · ${readyLessons - completedLessons} ready` : ''}
                   </p>
                   {dueCount > 0 && (
-                    <p className="font-sans text-[11px] text-accent tabular-nums">
+                    <p className="font-sans text-[12px] text-accent tabular-nums">
                       {dueCount} due
                     </p>
                   )}
@@ -238,8 +234,8 @@ export default function HomePage() {
         {/* Achievements */}
         <div className="space-y-3">
           <div className="flex items-baseline justify-between">
-            <h2 className="font-serif text-base font-semibold text-ink">Achievements</h2>
-            <span className="font-sans text-xs text-ink-2 tabular-nums">
+            <h2 className="font-serif text-base font-medium text-ink">Achievements</h2>
+            <span className="font-sans text-[12px] text-ink-2 tabular-nums">
               {achievements.length} / {ACHIEVEMENTS.length}
             </span>
           </div>
@@ -251,7 +247,7 @@ export default function HomePage() {
                   key={a.id}
                   title={`${a.title}: ${a.description}`}
                   className={`flex flex-col items-center gap-1 p-2 rounded-md border text-center transition-colors ${
-                    earned ? 'border-rule bg-card' : 'border-rule/40 bg-paper opacity-25'
+                    earned ? 'border-rule bg-card' : 'border-rule/40 bg-paper opacity-30'
                   }`}
                 >
                   <span className="text-xl leading-none">{a.icon}</span>

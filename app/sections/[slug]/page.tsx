@@ -20,9 +20,9 @@ const STATUS_LABEL = {
 
 const STATUS_CLASS = {
   empty: 'text-ink-2 border-rule',
-  generating: 'text-amber-600 border-amber-200 bg-amber-50',
-  ready: 'text-accent border-accent/30 bg-accent/5',
-  completed: 'text-sage border-sage/30 bg-sage/10',
+  generating: 'text-accent-deep border-accent/30 bg-accent-soft',
+  ready: 'text-accent border-accent/30 bg-accent-soft',
+  completed: 'text-ink-2 border-rule bg-paper',
 } as const;
 
 export default function SectionPage() {
@@ -51,7 +51,6 @@ export default function SectionPage() {
       setSection(sect);
       setLessons(sectionLessons);
 
-      // Load due card counts per lesson
       const cardsByLesson = await Promise.all(
         sectionLessons.map((l) => db.getFlashcards(supabase, l.id))
       );
@@ -80,7 +79,6 @@ export default function SectionPage() {
       });
       const json = await res.json() as { ok?: boolean; error?: string };
       if (!res.ok || json.error) throw new Error(json.error ?? 'Regeneration failed');
-      // Reload lessons to reflect updated generated_at
       const { data } = await supabase
         .from('lessons')
         .select('*')
@@ -101,17 +99,15 @@ export default function SectionPage() {
   return (
     <div className="min-h-dvh bg-paper pb-28">
       <header className="bg-card border-b border-rule px-5 py-3.5">
-        <div className="flex items-start gap-3">
-          <Link href="/" className="font-sans text-xs text-ink-2 hover:text-ink transition-colors mt-0.5">
-            ← Home
-          </Link>
-        </div>
+        <Link href="/" className="font-sans text-[12px] text-accent hover:text-accent-deep transition-colors">
+          ← Home
+        </Link>
         {section ? (
           <div className="mt-2">
-            <h1 className="font-serif text-lg font-semibold text-ink tracking-tight leading-snug">
+            <h1 className="font-serif text-lg font-medium text-ink leading-snug">
               {section.name}
             </h1>
-            <p className="font-sans text-xs text-ink-2 mt-0.5">
+            <p className="font-sans text-[12px] text-ink-2 mt-0.5">
               {Math.round(section.exam_weight * 100)}% of exam ·{' '}
               {completedCount}/{lessons.length} complete
               {readyCount > 0 && ` · ${readyCount} ready to study`}
@@ -136,47 +132,49 @@ export default function SectionPage() {
             return (
               <div
                 key={lesson.id}
-                className="border border-rule rounded-md bg-card overflow-hidden"
+                className="rounded-md border border-rule bg-card overflow-hidden"
               >
                 <Link
                   href={`/lessons/${lesson.id}`}
                   className="flex items-start justify-between gap-4 px-4 py-3 hover:bg-paper transition-colors group"
                 >
                   <div className="flex-1 min-w-0">
-                    <p className="font-sans text-sm font-medium text-ink leading-snug group-hover:text-accent transition-colors">
+                    <p className="font-sans text-[15px] font-medium text-ink leading-snug group-hover:text-accent transition-colors">
                       {lesson.title}
                     </p>
                     {status !== 'empty' && (
-                      <p className="font-sans text-[11px] text-ink-2 mt-0.5 tabular-nums">
-                        {due > 0 ? `${due} due` : status === 'completed' ? 'Completed' : 'No cards due'}
+                      <p className="font-sans text-[12px] text-ink-2 mt-0.5 tabular-nums">
+                        {due > 0 ? (
+                          <span className="text-accent">{due} due</span>
+                        ) : status === 'completed' ? 'Completed' : 'No cards due'}
                       </p>
                     )}
                   </div>
                   <span
-                    className={`shrink-0 mt-0.5 font-sans text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border ${STATUS_CLASS[status]}`}
+                    className={`shrink-0 mt-0.5 font-sans text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded border ${STATUS_CLASS[status]}`}
                   >
                     {STATUS_LABEL[status]}
                   </span>
                 </Link>
 
                 {(status === 'ready' || status === 'completed') && (
-                  <div className="flex items-center gap-0 border-t border-rule divide-x divide-rule">
+                  <div className="flex items-center border-t border-rule divide-x divide-rule">
                     <Link
-                      href={`/lessons/${lesson.id}?tab=flashcards`}
-                      className="flex-1 text-center py-2 font-sans text-[11px] text-ink-2 hover:text-ink hover:bg-paper transition-colors"
+                      href={`/lessons/${lesson.id}?tab=cards`}
+                      className="flex-1 text-center py-2 font-sans text-[12px] text-ink-2 hover:text-ink hover:bg-paper transition-colors"
                     >
                       Cards {due > 0 ? `(${due} due)` : ''}
                     </Link>
                     <Link
                       href={`/lessons/${lesson.id}?tab=practice`}
-                      className="flex-1 text-center py-2 font-sans text-[11px] text-ink-2 hover:text-ink hover:bg-paper transition-colors"
+                      className="flex-1 text-center py-2 font-sans text-[12px] text-ink-2 hover:text-ink hover:bg-paper transition-colors"
                     >
                       Practice
                     </Link>
                     <button
                       onClick={() => handleRegenerate(lesson)}
                       disabled={isRegenerating}
-                      className="flex-1 text-center py-2 font-sans text-[11px] text-ink-2 hover:text-ink hover:bg-paper transition-colors disabled:opacity-40"
+                      className="flex-1 text-center py-2 font-sans text-[12px] text-ink-2 hover:text-ink hover:bg-paper transition-colors disabled:opacity-40"
                     >
                       {isRegenerating ? 'Generating…' : 'Regenerate'}
                     </button>
@@ -185,7 +183,7 @@ export default function SectionPage() {
 
                 {status === 'empty' && (
                   <div className="border-t border-rule px-4 py-2">
-                    <p className="font-sans text-[11px] text-ink-2">
+                    <p className="font-sans text-[12px] text-ink-2">
                       No source content yet.{' '}
                       <Link href="/ingest" className="text-accent hover:underline">
                         Add via Ingest
@@ -197,7 +195,7 @@ export default function SectionPage() {
                 {status === 'generating' && (
                   <div className="border-t border-rule px-4 py-2 flex items-center gap-2">
                     <Spinner />
-                    <p className="font-sans text-[11px] text-ink-2">Generating…</p>
+                    <p className="font-sans text-[12px] text-ink-2">Generating…</p>
                   </div>
                 )}
               </div>
@@ -208,7 +206,7 @@ export default function SectionPage() {
         <div className="pt-2">
           <Link
             href="/ingest"
-            className="block w-full text-center py-3 rounded-md border border-rule font-sans text-sm font-medium text-ink-2 hover:border-accent hover:text-accent transition-colors"
+            className="block w-full text-center py-3 rounded-md border border-rule font-sans text-[14px] font-medium text-ink-2 hover:border-accent hover:text-accent transition-colors"
           >
             + Add lesson to this section
           </Link>
@@ -222,16 +220,16 @@ export default function SectionPage() {
 
 function EmptyState({ sectionId }: { sectionId?: string }) {
   return (
-    <div className="border border-rule rounded-md bg-card p-6 text-center space-y-3">
-      <p className="font-serif text-xl font-semibold text-ink">No lessons yet</p>
-      <p className="font-sans text-sm text-ink-2 leading-relaxed">
+    <div className="rounded-md border border-rule bg-card p-6 text-center space-y-3">
+      <p className="font-serif text-xl font-medium text-ink">No lessons yet</p>
+      <p className="font-sans text-[14px] text-ink-2 leading-relaxed">
         Paste content from the prep guide to generate flashcards and practice questions.
       </p>
       <Link
         href={sectionId ? `/ingest?section=${sectionId}` : '/ingest'}
-        className="inline-block mt-2 px-5 py-2.5 rounded-md bg-accent text-card font-sans text-sm font-medium hover:opacity-90 transition-opacity"
+        className="inline-block mt-2 px-5 py-2.5 rounded-md bg-accent text-card font-sans text-[14px] font-medium hover:opacity-90 transition-opacity"
       >
-        Add First Lesson
+        Add first lesson
       </Link>
     </div>
   );

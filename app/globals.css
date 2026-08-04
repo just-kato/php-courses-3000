@@ -2,30 +2,38 @@
 
 /* ── Color palette ── */
 :root {
-  --paper:        #FAF8F3;
-  --card:         #FFFFFF;
-  --rule:         #E8E2D6;
-  --ink:          #2B2620;
-  --ink-2:        #6B6459;
-  --accent:       #B4531F;
-  --accent-soft:  #F3E6DC;
-  --sage:         #5B7A55;
-  --correct:      #EAF0E6;
-  --wrong:        #F5E3E0;
+  --paper:        #F4EFE9;
+  --card:         #FBF8F5;
+  --callout:      #FDF3E7;
+  --rule:         #DDD6CE;
+  --ink:          #22201D;
+  --ink-body:     #33302C;
+  --ink-2:        #6B6560;
+  --accent:       #B4533A;
+  --accent-deep:  #8C3D28;
+  --accent-soft:  #FDF3E7;
+  --pill-bg:      #F0E7DC;
+  --sage:         #4F7049;
+  --correct:      #EAF0E5;
+  --wrong:        #F5E8E5;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper:        #1C1A17;
-    --card:         #26231F;
-    --rule:         #35312B;
-    --ink:          #EDE8DF;
-    --ink-2:        #A39C90;
-    --accent:       #D4763F;
-    --accent-soft:  #2A1E15;
-    --sage:         #7A9A74;
-    --correct:      #1A2319;
-    --wrong:        #271916;
+    --paper:        #1E1B17;
+    --card:         #2A2520;
+    --callout:      #2C2417;
+    --rule:         #3A352D;
+    --ink:          #EDE8E0;
+    --ink-body:     #D4CEC5;
+    --ink-2:        #9A9087;
+    --accent:       #D4764A;
+    --accent-deep:  #E08B5F;
+    --accent-soft:  #2C1F14;
+    --pill-bg:      #3A2A1E;
+    --sage:         #6B9564;
+    --correct:      #1C281A;
+    --wrong:        #281917;
   }
 }
 
@@ -34,10 +42,14 @@
   /* Colors */
   --color-paper:        var(--paper);
   --color-card:         var(--card);
+  --color-callout:      var(--callout);
   --color-rule:         var(--rule);
   --color-ink:          var(--ink);
+  --color-ink-body:     var(--ink-body);
   --color-ink-2:        var(--ink-2);
+  --color-muted:        var(--ink-2);
   --color-accent:       var(--accent);
+  --color-accent-deep:  var(--accent-deep);
   --color-accent-soft:  var(--accent-soft);
   --color-sage:         var(--sage);
   --color-correct:      var(--correct);
@@ -58,7 +70,6 @@ body {
   font-feature-settings: "liga" 1, "kern" 1;
 }
 
-/* Headings default to serif */
 h1, h2, h3, h4 {
   font-family: var(--font-fraunces), ui-serif, Georgia, serif;
 }
