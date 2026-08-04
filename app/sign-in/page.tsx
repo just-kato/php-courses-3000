@@ -28,23 +28,19 @@ export default function SignInPage() {
   }
 
   return (
-    <main className="min-h-dvh bg-paper flex flex-col items-center justify-center px-6">
-      <div className="w-full max-w-xs space-y-10">
+    <main className="min-h-dvh bg-bg flex flex-col justify-center px-6 md:px-0">
+      <div className="w-full max-w-sm mx-auto md:ml-[15vw]">
 
-        <div className="text-center space-y-2">
-          <h1 className="font-serif text-4xl font-medium text-ink">MLO Study</h1>
-          <p className="font-sans text-[14px] text-ink-2 leading-relaxed">
-            NMLS exam prep.<br />Your progress syncs across all devices.
+        <div className="mb-10">
+          <h1 className="text-[38px] font-medium text-fg leading-none tracking-[-0.03em]">MLO Study</h1>
+          <p className="text-[14px] text-n500 mt-3 leading-relaxed">
+            NMLS exam prep. Your progress syncs across all devices.
           </p>
         </div>
 
-        <div className="border-t border-rule" />
-
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-1.5">
-            <label htmlFor="email" className="block font-sans text-[12px] font-medium text-ink-2">
-              Email address
-            </label>
+          <div className="field">
+            <label htmlFor="email">Email address</label>
             <input
               id="email"
               type="email"
@@ -53,14 +49,12 @@ export default function SignInPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              className="w-full px-3.5 py-2.5 rounded-md border border-rule bg-card text-ink font-sans text-[14px] placeholder:text-ink-2/50 focus:outline-none focus:border-accent transition-colors"
+              className="input"
             />
           </div>
 
-          <div className="space-y-1.5">
-            <label htmlFor="password" className="block font-sans text-[12px] font-medium text-ink-2">
-              Password
-            </label>
+          <div className="field">
+            <label htmlFor="password">Password</label>
             <input
               id="password"
               type="password"
@@ -69,18 +63,18 @@ export default function SignInPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              className="w-full px-3.5 py-2.5 rounded-md border border-rule bg-card text-ink font-sans text-[14px] placeholder:text-ink-2/50 focus:outline-none focus:border-accent transition-colors"
+              className="input"
             />
           </div>
 
           {error && (
-            <p className="font-sans text-[14px] text-accent leading-snug">{error}</p>
+            <p className="text-[13px] leading-snug" style={{ color: '#e87d6e' }}>{error}</p>
           )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 rounded-md bg-accent text-card font-sans text-[14px] font-medium hover:opacity-90 disabled:opacity-50 transition-opacity active:scale-[0.99]"
+            className="btn btn-primary btn-block"
           >
             {loading ? 'Signing in…' : 'Sign in'}
           </button>
