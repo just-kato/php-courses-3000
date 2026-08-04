@@ -11,6 +11,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: 'MLO Study',
   description: 'NMLS Mortgage Loan Originator exam prep — learn, flashcards, practice quizzes.',
+  icons: { icon: '/favicon.ico' },
 };
 
 export const viewport: Viewport = {
