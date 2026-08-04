@@ -6,11 +6,12 @@ import Link from 'next/link';
 import { createClient } from '@/utils/supabase/client';
 import { BottomNav } from '@/components/BottomNav';
 import * as db from '@/lib/db';
+import type { TextbookChunk } from '@/lib/db';
 import { scheduleCard, filterDue } from '@/lib/srs';
-import { lessonStatus, EXAM_SCORED_QUESTIONS } from '@/lib/db-types';
+import { lessonStatus } from '@/lib/db-types';
 import type { Lesson, Section, Flashcard, Question, QuestionType } from '@/lib/db-types';
 
-type Tab = 'source' | 'why' | 'flashcards' | 'practice';
+type Tab = 'source' | 'why' | 'cards' | 'practice';
 
 const TYPE_LABEL: Record<QuestionType, string> = {
   factual: 'Factual',
@@ -19,10 +20,67 @@ const TYPE_LABEL: Record<QuestionType, string> = {
 };
 
 const TYPE_CLASS: Record<QuestionType, string> = {
-  factual: 'text-ink-2 border-rule',
-  scenario: 'text-blue-600 border-blue-200 bg-blue-50',
-  calculation: 'text-amber-600 border-amber-200 bg-amber-50',
+  factual: 'text-ink-2 border-rule bg-paper',
+  scenario: 'text-ink border-rule bg-paper',
+  calculation: 'text-accent-deep border-accent/30 bg-accent-soft',
 };
+
+// ── Source renderer ─────────────────────────────────────────────────────────
+
+type ParsedBlock =
+  | { type: 'heading'; text: string }
+  | { type: 'list'; items: string[] }
+  | { type: 'paragraph'; text: string };
+
+function parseSource(text: string): ParsedBlock[] {
+  const sections = text.split(/\n{2,}/);
+  const blocks: ParsedBlock[] = [];
+  const bulletRe = /^[-•*]\s|^\d+[.)]\s/;
+
+  for (const section of sections) {
+    const lines = section.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0) continue;
+
+    if (lines.length === 1 && lines[0].length <= 80 && lines[0].endsWith(':')) {
+      blocks.push({ type: 'heading', text: lines[0] });
+      continue;
+    }
+
+    const bulletLines = lines.filter((l) => bulletRe.test(l));
+    if (bulletLines.length >= 2 && bulletLines.length / lines.length >= 0.5) {
+      blocks.push({ type: 'list', items: lines.map((l) => l.replace(/^[-•*]\s*|^\d+[.)]\s*/, '')) });
+      continue;
+    }
+
+    blocks.push({ type: 'paragraph', text: lines.join(' ') });
+  }
+
+  return blocks;
+}
+
+function RenderedBlock({ block }: { block: ParsedBlock }) {
+  if (block.type === 'heading') {
+    return (
+      <p className="font-sans text-[13px] font-medium text-accent-deep tracking-wide mt-2">
+        {block.text}
+      </p>
+    );
+  }
+  if (block.type === 'list') {
+    return (
+      <ul className="list-disc list-outside pl-5 space-y-1">
+        {block.items.map((item, i) => (
+          <li key={i} className="font-sans text-[15px] leading-[1.7] text-ink-body">{item}</li>
+        ))}
+      </ul>
+    );
+  }
+  return (
+    <p className="font-sans text-[15px] leading-[1.7] text-ink-body">{block.text}</p>
+  );
+}
+
+// ── Main component ─────────────────────────────────────────────────────────
 
 export default function LessonPage() {
   const { id } = useParams<{ id: string }>();
@@ -30,7 +88,9 @@ export default function LessonPage() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
-  const initialTab = (searchParams.get('tab') as Tab) ?? 'source';
+  // Handle legacy ?tab=flashcards links
+  const rawTab = searchParams.get('tab');
+  const initialTab = ((rawTab === 'flashcards' ? 'cards' : rawTab) as Tab) ?? 'source';
   const [tab, setTab] = useState<Tab>(initialTab);
 
   const [lesson, setLesson] = useState<Lesson | null>(null);
@@ -53,9 +113,13 @@ export default function LessonPage() {
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [chosen, setChosen] = useState<Record<string, number>>({});
 
-  // Source anchor highlight ref
-  const sourceRef = useRef<HTMLDivElement>(null);
+  // Textbook search state
+  const [textbookOpen, setTextbookOpen] = useState(false);
+  const [textbookQuery, setTextbookQuery] = useState('');
+  const [textbookResults, setTextbookResults] = useState<TextbookChunk[]>([]);
+  const [textbookLoading, setTextbookLoading] = useState(false);
 
+  const sourceRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -91,13 +155,10 @@ export default function LessonPage() {
       setSection(sectionData);
       setCards(cardsData);
       setQuestions(questionsData);
-
-      const due = filterDue(cardsData);
-      setReviewQueue(due);
+      setReviewQueue(filterDue(cardsData));
       setReviewIdx(0);
       setLoading(false);
 
-      // If still generating, subscribe so the UI reacts when generated_at is set
       if (lessonStatus(lessonData) === 'generating') {
         const channel = supabase
           .channel(`lesson-gen-${lessonData.id}`)
@@ -106,14 +167,11 @@ export default function LessonPage() {
             { event: 'UPDATE', schema: 'public', table: 'lessons', filter: `id=eq.${lessonData.id}` },
             async (payload) => {
               if (!(payload.new as Lesson).generated_at) return;
-
-              // Fetch fresh data now that generation is complete
               const [freshLesson, freshCards, freshQuestions] = await Promise.all([
                 db.getLessonById(supabase, id),
                 db.getFlashcards(supabase, id),
                 db.getQuestions(supabase, id),
               ]);
-
               if (freshLesson) setLesson(freshLesson);
               setCards(freshCards);
               setQuestions(freshQuestions);
@@ -123,14 +181,8 @@ export default function LessonPage() {
             }
           )
           .subscribe();
-
         channelRef.current = channel;
-
-        // 3-minute timeout: surface the stall instead of spinning forever
-        timeoutRef.current = setTimeout(() => {
-          cleanup();
-          setGenerationError(true);
-        }, 3 * 60 * 1000);
+        timeoutRef.current = setTimeout(() => { cleanup(); setGenerationError(true); }, 3 * 60 * 1000);
       }
     });
 
@@ -138,12 +190,33 @@ export default function LessonPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase, router, id]);
 
-  // ── Flashcard review handlers ──────────────────────────────────────────────
+  // ── Textbook search ──────────────────────────────────────────────────────
+
+  async function openTextbookSearch() {
+    const query = lesson?.title ?? '';
+    setTextbookQuery(query);
+    setTextbookOpen(true);
+    if (query) {
+      setTextbookLoading(true);
+      const results = await db.searchTextbook(supabase, query);
+      setTextbookResults(results);
+      setTextbookLoading(false);
+    }
+  }
+
+  async function runTextbookSearch() {
+    if (!textbookQuery.trim()) return;
+    setTextbookLoading(true);
+    const results = await db.searchTextbook(supabase, textbookQuery);
+    setTextbookResults(results);
+    setTextbookLoading(false);
+  }
+
+  // ── Flashcard review handlers ───────────────────────────────────────────
 
   async function handleCardAnswer(correct: boolean) {
     const card = reviewQueue[reviewIdx];
     if (!card) return;
-
     const updates = scheduleCard(card, correct);
     await db.updateFlashcardSRS(supabase, card.id, {
       ease: updates.ease,
@@ -151,7 +224,6 @@ export default function LessonPage() {
       due_at: updates.due_at.toISOString(),
       lapses: updates.lapses,
     });
-
     setCards((prev) =>
       prev.map((c) =>
         c.id === card.id
@@ -159,10 +231,8 @@ export default function LessonPage() {
           : c
       )
     );
-
     if (correct) setSessionCorrect((n) => n + 1);
     setSessionTotal((n) => n + 1);
-
     const next = reviewIdx + 1;
     if (next >= reviewQueue.length) {
       setReviewDone(true);
@@ -182,14 +252,13 @@ export default function LessonPage() {
     setReviewDone(false);
   }
 
-  // ── Practice handlers ──────────────────────────────────────────────────────
+  // ── Practice handlers ────────────────────────────────────────────────────
 
   async function handleAnswer(question: Question, chosenIdx: number) {
     if (chosen[question.id] !== undefined) return;
     const correct = chosenIdx === question.correct_index;
     setChosen((prev) => ({ ...prev, [question.id]: chosenIdx }));
     setRevealed((prev) => ({ ...prev, [question.id]: true }));
-
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       await db.recordAttempt(supabase, {
@@ -228,6 +297,8 @@ export default function LessonPage() {
     }, 100);
   }
 
+  // ── Loading skeleton ─────────────────────────────────────────────────────
+
   if (loading || !lesson) {
     return (
       <div className="min-h-dvh bg-paper pb-28">
@@ -242,9 +313,9 @@ export default function LessonPage() {
   }
 
   const status = lessonStatus(lesson);
+  const dueCount = filterDue(cards).length;
   const filteredQuestions =
     typeFilter === 'all' ? questions : questions.filter((q) => q.question_type === typeFilter);
-
   const practiceAnswered = Object.keys(chosen).length;
   const practiceCorrect = Object.entries(chosen).filter(([qid, ci]) => {
     const q = questions.find((q) => q.id === qid);
@@ -253,56 +324,136 @@ export default function LessonPage() {
 
   return (
     <div className="min-h-dvh bg-paper pb-28">
-      {/* Header */}
+
+      {/* ── Header ── */}
       <header className="bg-card border-b border-rule px-5 py-3.5">
-        <div className="flex items-center gap-3 mb-2">
-          {section && (
+        {section && (
+          <div className="mb-1.5">
             <Link
               href={`/sections/${section.slug}`}
-              className="font-sans text-xs text-ink-2 hover:text-ink transition-colors"
+              className="font-sans text-[12px] text-accent hover:text-accent-deep transition-colors"
             >
-              ← {section.name}
+              ← {section.name} · {Math.round(section.exam_weight * 100)}% of exam
             </Link>
-          )}
-        </div>
-        <h1 className="font-serif text-base font-semibold text-ink leading-snug">
+          </div>
+        )}
+        <h1 className="font-serif text-[21px] font-medium text-ink leading-snug">
           {lesson.title}
         </h1>
-        <p className="font-sans text-[11px] text-ink-2 mt-0.5">
+        <p className="font-sans text-[12px] text-ink-2 mt-1">
           {cards.length} cards · {questions.length} questions
-          {filterDue(cards).length > 0 && ` · ${filterDue(cards).length} due`}
+          {dueCount > 0 && (
+            <> · <span className="text-accent font-medium">{dueCount} due</span></>
+          )}
         </p>
       </header>
 
-      {/* Tabs */}
+      {/* ── Tabs ── */}
       <div className="bg-card border-b border-rule">
         <div className="max-w-lg mx-auto flex">
-          {(['source', 'why', 'flashcards', 'practice'] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`flex-1 py-2.5 font-sans text-xs font-medium capitalize tracking-wide transition-colors border-b-2 ${
-                tab === t
-                  ? 'text-accent border-accent'
-                  : 'text-ink-2 border-transparent hover:text-ink'
-              }`}
-            >
-              {t === 'why' ? 'Why' : t === 'flashcards' ? 'Cards' : t.charAt(0).toUpperCase() + t.slice(1)}
-            </button>
-          ))}
+          {(['source', 'why', 'cards', 'practice'] as Tab[]).map((t) => {
+            const label =
+              t === 'cards' ? 'Cards' :
+              t === 'why' ? 'Why' :
+              t === 'source' ? 'Source' : 'Practice';
+            return (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`flex-1 py-2.5 font-sans text-[13px] font-medium flex items-center justify-center gap-1.5 transition-colors border-b-2 ${
+                  tab === t
+                    ? 'text-accent-deep border-accent'
+                    : 'text-ink-2 border-transparent hover:text-ink'
+                }`}
+              >
+                {label}
+                {t === 'cards' && cards.length > 0 && (
+                  <span
+                    className="font-sans text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                    style={{ background: 'var(--pill-bg)', color: 'var(--accent-deep)' }}
+                  >
+                    {cards.length}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
+      {/* ── Tab content ── */}
       <div className="max-w-lg mx-auto px-5 py-6">
 
         {/* ── Source tab ── */}
         {tab === 'source' && (
-          <div
-            ref={sourceRef}
-            className="font-sans text-sm text-ink leading-7 whitespace-pre-wrap selection:bg-accent/20"
-            style={{ fontFamily: 'Georgia, Cambria, serif', fontSize: '0.9375rem', lineHeight: '1.85' }}
-          >
-            {lesson.source_content}
+          <div>
+            <div ref={sourceRef} className="space-y-3.5 selection:bg-accent/10">
+              {parseSource(lesson.source_content).map((block, i) => (
+                <RenderedBlock key={i} block={block} />
+              ))}
+            </div>
+
+            {/* Textbook bar */}
+            <div className="mt-8 rounded-lg bg-paper border border-rule px-4 py-3 flex items-center gap-3">
+              <BookIcon className="w-4 h-4 text-ink-2 shrink-0" />
+              <span className="font-sans text-[13px] text-ink-2 flex-1">Check this against the textbook</span>
+              <button
+                onClick={openTextbookSearch}
+                className="font-sans text-[13px] font-medium text-accent hover:text-accent-deep transition-colors"
+              >
+                Search →
+              </button>
+            </div>
+
+            {/* Textbook search panel */}
+            {textbookOpen && (
+              <div className="mt-3 space-y-3">
+                <div className="flex gap-2">
+                  <input
+                    value={textbookQuery}
+                    onChange={(e) => setTextbookQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && runTextbookSearch()}
+                    placeholder="Search textbook…"
+                    className="flex-1 px-3 py-2 rounded-md border border-rule bg-card font-sans text-[14px] text-ink placeholder:text-ink-2/50 focus:outline-none focus:border-ink-2 transition-colors"
+                  />
+                  <button
+                    onClick={runTextbookSearch}
+                    className="px-4 py-2 rounded-md bg-accent text-card font-sans text-[13px] font-medium hover:opacity-90 transition-opacity"
+                  >
+                    Go
+                  </button>
+                  <button
+                    onClick={() => { setTextbookOpen(false); setTextbookResults([]); }}
+                    className="px-3 py-2 rounded-md border border-rule font-sans text-[13px] text-ink-2 hover:text-ink transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {textbookLoading && (
+                  <div className="space-y-2">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="h-16 animate-pulse rounded-md bg-rule opacity-40" />
+                    ))}
+                  </div>
+                )}
+
+                {!textbookLoading && textbookResults.length === 0 && textbookQuery && (
+                  <p className="font-sans text-[13px] text-ink-2 text-center py-4">No results found.</p>
+                )}
+
+                {!textbookLoading && textbookResults.map((chunk) => (
+                  <div key={chunk.id} className="rounded-md border border-rule bg-card px-4 py-3 space-y-1">
+                    {chunk.heading && (
+                      <p className="font-sans text-[11px] font-medium text-accent-deep uppercase tracking-wide">
+                        {chunk.heading}
+                      </p>
+                    )}
+                    <p className="font-sans text-[14px] text-ink-body leading-relaxed">{chunk.content}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -310,35 +461,31 @@ export default function LessonPage() {
         {tab === 'why' && (
           <div>
             {status === 'empty' || status === 'generating' ? (
-              <div className="border border-rule rounded-md bg-card p-6 text-center space-y-3">
+              <div className="rounded-md border border-rule bg-card p-6 text-center space-y-3">
                 {generationError ? (
                   <>
-                    <p className="font-serif text-base font-semibold text-ink">Generation stalled</p>
-                    <p className="font-sans text-sm text-ink-2">
-                      Refresh the page in a moment to check if it finished.
-                    </p>
+                    <p className="font-serif text-base font-medium text-ink">Generation stalled</p>
+                    <p className="font-sans text-[14px] text-ink-2">Refresh the page in a moment to check if it finished.</p>
+                  </>
+                ) : status === 'generating' ? (
+                  <>
+                    <Spinner />
+                    <p className="font-sans text-[14px] text-ink-2">Generating — check back in a moment.</p>
                   </>
                 ) : (
                   <>
-                    <p className="font-serif text-base font-semibold text-ink">
-                      {status === 'generating' ? 'Generating…' : 'Not yet generated'}
-                    </p>
-                    <p className="font-sans text-sm text-ink-2">
-                      {status === 'generating'
-                        ? 'Check back in a moment.'
-                        : 'Add source content and generate to see the explainer.'}
-                    </p>
-                    {status === 'generating' && <Spinner />}
+                    <p className="font-serif text-base font-medium text-ink">Not yet generated</p>
+                    <p className="font-sans text-[14px] text-ink-2">Add source content and generate to see the explainer.</p>
                   </>
                 )}
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="border border-rule rounded-md bg-card px-5 py-4">
-                  <p className="font-sans text-xs font-semibold uppercase tracking-wider text-ink-2 mb-2">
-                    Why This Matters on the Exam
+                <div className="rounded-md border border-rule bg-callout px-5 py-4">
+                  <p className="font-sans text-[11px] font-medium text-accent-deep uppercase tracking-wide mb-2">
+                    Why this matters on the exam
                   </p>
-                  <p className="font-sans text-sm text-ink leading-relaxed">
+                  <p className="font-sans text-[15px] text-ink-body leading-[1.7]">
                     {lesson.why_it_matters}
                   </p>
                 </div>
@@ -348,13 +495,13 @@ export default function LessonPage() {
                       await db.markLessonComplete(supabase, lesson.id);
                       setLesson((prev) => prev ? { ...prev, completed_at: new Date().toISOString() } : prev);
                     }}
-                    className="w-full py-2.5 rounded-md border border-rule font-sans text-sm font-medium text-ink-2 hover:border-sage hover:text-sage transition-colors"
+                    className="w-full py-2.5 rounded-md border border-rule font-sans text-[14px] font-medium text-ink-2 hover:border-accent hover:text-accent transition-colors"
                   >
-                    Mark as Completed
+                    Mark as completed
                   </button>
                 )}
                 {lesson.completed_at && (
-                  <p className="font-sans text-[11px] text-sage text-center">
+                  <p className="font-sans text-[12px] text-sage text-center">
                     Completed {new Date(lesson.completed_at).toLocaleDateString()}
                   </p>
                 )}
@@ -363,24 +510,24 @@ export default function LessonPage() {
           </div>
         )}
 
-        {/* ── Flashcards tab ── */}
-        {tab === 'flashcards' && (
+        {/* ── Cards tab ── */}
+        {tab === 'cards' && (
           <div>
             {cards.length === 0 ? (
               <NoContent status={status} type="cards" generationError={generationError} />
             ) : reviewDone || reviewQueue.length === 0 ? (
-              <div className="border border-rule rounded-md bg-card p-6 space-y-4 text-center">
-                <p className="font-serif text-xl font-semibold text-ink">
+              <div className="rounded-md border border-rule bg-card p-6 space-y-4 text-center">
+                <p className="font-serif text-xl font-medium text-ink">
                   {reviewQueue.length === 0 ? 'All caught up' : 'Session done'}
                 </p>
                 {sessionTotal > 0 && (
-                  <p className="font-sans text-sm text-ink-2">
+                  <p className="font-sans text-[14px] text-ink-2">
                     {sessionCorrect} / {sessionTotal} correct this session
                   </p>
                 )}
                 {reviewQueue.length === 0 && (
-                  <p className="font-sans text-sm text-ink-2">
-                    No cards due right now. Come back later or review all {cards.length} cards.
+                  <p className="font-sans text-[14px] text-ink-2">
+                    No cards due right now. Come back later or review all {cards.length}.
                   </p>
                 )}
                 <div className="space-y-2 pt-2">
@@ -393,14 +540,14 @@ export default function LessonPage() {
                       setSessionTotal(0);
                       setReviewDone(false);
                     }}
-                    className="w-full py-2.5 rounded-md border border-rule font-sans text-sm text-ink-2 hover:border-ink-2 hover:text-ink transition-colors"
+                    className="w-full py-2.5 rounded-md border border-rule font-sans text-[14px] text-ink-2 hover:border-ink-2 hover:text-ink transition-colors"
                   >
                     Review all {cards.length} cards
                   </button>
                   {reviewDone && filterDue(cards).length > 0 && (
                     <button
                       onClick={restartReview}
-                      className="w-full py-2.5 rounded-md bg-accent text-card font-sans text-sm font-medium hover:opacity-90 transition-opacity"
+                      className="w-full py-2.5 rounded-md bg-accent text-card font-sans text-[14px] font-medium hover:opacity-90 transition-opacity"
                     >
                       Review {filterDue(cards).length} due again
                     </button>
@@ -429,13 +576,12 @@ export default function LessonPage() {
               <NoContent status={status} type="questions" generationError={generationError} />
             ) : (
               <>
-                {/* Type filter */}
                 <div className="flex gap-2 flex-wrap">
                   {(['all', 'factual', 'scenario', 'calculation'] as const).map((t) => (
                     <button
                       key={t}
                       onClick={() => setTypeFilter(t)}
-                      className={`px-3 py-1 rounded-full border font-sans text-[11px] font-semibold uppercase tracking-wider transition-colors ${
+                      className={`px-3 py-1 rounded-full border font-sans text-[11px] font-medium transition-colors ${
                         typeFilter === t
                           ? 'bg-ink text-card border-ink'
                           : 'border-rule text-ink-2 hover:border-ink-2 hover:text-ink'
@@ -449,77 +595,69 @@ export default function LessonPage() {
                 </div>
 
                 {practiceAnswered > 0 && (
-                  <p className="font-sans text-[11px] text-ink-2 tabular-nums">
+                  <p className="font-sans text-[12px] text-ink-2 tabular-nums">
                     {practiceCorrect}/{practiceAnswered} correct
                   </p>
                 )}
 
-                <div className="space-y-6">
+                <div className="space-y-5">
                   {filteredQuestions.map((q, qi) => {
                     const isRevealed = !!revealed[q.id];
                     const chosenIdx = chosen[q.id];
 
                     return (
-                      <div key={q.id} className="border border-rule rounded-md bg-card overflow-hidden">
-                        {/* Question header */}
+                      <div key={q.id} className="rounded-md border border-rule bg-card overflow-hidden">
                         <div className="px-4 pt-4 pb-3 border-b border-rule">
-                          <div className="flex items-start gap-3 mb-2">
-                            <span className="font-sans text-[10px] font-semibold uppercase tracking-wider text-ink-2 tabular-nums shrink-0 mt-0.5">
-                              {qi + 1}
+                          <div className="flex items-start gap-2.5 mb-2">
+                            <span className="font-sans text-[11px] text-ink-2 tabular-nums shrink-0 mt-0.5">
+                              {qi + 1}.
                             </span>
                             <span
-                              className={`font-sans text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border shrink-0 ${TYPE_CLASS[q.question_type]}`}
+                              className={`font-sans text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded border shrink-0 ${TYPE_CLASS[q.question_type]}`}
                             >
                               {TYPE_LABEL[q.question_type]}
                             </span>
                           </div>
-                          <p className="font-sans text-sm text-ink leading-relaxed">{q.stem}</p>
+                          <p className="font-sans text-[15px] text-ink leading-relaxed">{q.stem}</p>
                         </div>
 
-                        {/* Options */}
                         <div className="divide-y divide-rule">
                           {q.options.map((opt, ci) => {
                             const isChosen = chosenIdx === ci;
                             const isCorrect = q.correct_index === ci;
                             let optClass = 'text-ink hover:bg-paper cursor-pointer';
                             if (isRevealed) {
-                              if (isCorrect) optClass = 'bg-sage/10 text-sage cursor-default';
+                              if (isCorrect) optClass = 'bg-correct text-ink cursor-default';
                               else if (isChosen && !isCorrect) optClass = 'bg-wrong text-ink cursor-default';
                               else optClass = 'text-ink-2 cursor-default';
                             }
-
                             return (
                               <button
                                 key={ci}
                                 disabled={isRevealed}
                                 onClick={() => handleAnswer(q, ci)}
-                                className={`w-full text-left flex items-start gap-3 px-4 py-3 transition-colors font-sans text-sm ${optClass}`}
+                                className={`w-full text-left flex items-start gap-3 px-4 py-3 transition-colors font-sans text-[14px] ${optClass}`}
                               >
-                                <span className="font-semibold text-ink-2 shrink-0 tabular-nums w-4">
+                                <span className="font-medium text-ink-2 shrink-0 tabular-nums w-4">
                                   {String.fromCharCode(65 + ci)}.
                                 </span>
                                 <span className="flex-1">{opt}</span>
-                                {isRevealed && isCorrect && (
-                                  <span className="text-sage shrink-0">✓</span>
-                                )}
-                                {isRevealed && isChosen && !isCorrect && (
-                                  <span className="text-accent shrink-0">✗</span>
-                                )}
+                                {isRevealed && isCorrect && <span className="text-sage shrink-0">✓</span>}
+                                {isRevealed && isChosen && !isCorrect && <span className="text-accent shrink-0">✗</span>}
                               </button>
                             );
                           })}
                         </div>
 
-                        {/* Explanation + source anchor */}
                         {isRevealed && (
-                          <div className="px-4 pb-4 pt-3 border-t border-rule space-y-2 bg-paper">
-                            <p className="font-sans text-xs text-ink leading-relaxed">
+                          <div className="px-4 pb-4 pt-3 border-t border-rule bg-callout space-y-2">
+                            <p className="font-sans text-[13px] text-ink-body leading-relaxed">
                               {q.explanation}
                             </p>
                             {q.source_anchor && (
                               <button
                                 onClick={() => scrollToAnchor(q.source_anchor)}
-                                className="font-sans text-[11px] text-ink-2 hover:text-accent italic leading-relaxed text-left transition-colors"
+                                className="font-sans text-[12px] text-ink-2 hover:text-accent italic transition-colors text-left"
                               >
                                 "{q.source_anchor}" →
                               </button>
@@ -541,7 +679,7 @@ export default function LessonPage() {
   );
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────────────
+// ── Sub-components ──────────────────────────────────────────────────────────────
 
 function FlashcardReview({
   card,
@@ -565,47 +703,45 @@ function FlashcardReview({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <span className="font-sans text-xs text-ink-2 tabular-nums">{cardNum} of {total}</span>
+        <span className="font-sans text-[12px] text-ink-2 tabular-nums">{cardNum} of {total}</span>
         {card.lapses > 0 && (
-          <span className="font-sans text-[10px] text-ink-2 tabular-nums">{card.lapses} lapses</span>
+          <span className="font-sans text-[11px] text-ink-2 tabular-nums">{card.lapses} lapses</span>
         )}
       </div>
 
       <button
         onClick={onFlip}
-        className="w-full min-h-48 border border-rule rounded-md bg-card p-8 text-left cursor-pointer hover:bg-paper transition-colors group"
+        className="w-full min-h-48 rounded-md border border-rule bg-card p-8 text-left cursor-pointer hover:bg-paper transition-colors"
       >
-        <p className="font-sans text-[10px] font-semibold uppercase tracking-wider text-ink-2 mb-4">
+        <p className="font-sans text-[11px] font-medium text-ink-2 uppercase tracking-wide mb-4">
           {flipped ? 'Answer' : 'Description'}
         </p>
         <p className="font-serif text-ink text-lg leading-relaxed">
           {flipped ? card.back : card.front}
         </p>
         {!flipped && (
-          <p className="font-sans text-[11px] text-ink-2/60 mt-6">Tap to reveal</p>
+          <p className="font-sans text-[12px] text-ink-2/60 mt-6">Tap to reveal</p>
         )}
         {flipped && card.source_anchor && (
           <button
             onClick={(e) => { e.stopPropagation(); onAnchorClick(card.source_anchor); }}
-            className="mt-4 font-sans text-[11px] text-ink-2 hover:text-accent italic transition-colors"
+            className="mt-4 font-sans text-[12px] text-ink-2 hover:text-accent italic transition-colors"
           >
             "{card.source_anchor.slice(0, 60)}…" →
           </button>
         )}
       </button>
 
-      <div
-        className={`flex gap-3 transition-all duration-150 ${flipped ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-      >
+      <div className={`flex gap-3 transition-all duration-150 ${flipped ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         <button
           onClick={onWrong}
-          className="flex-1 py-3 rounded-md border border-rule font-sans text-sm font-medium text-ink-2 hover:border-ink hover:text-ink transition-colors active:scale-[0.99]"
+          className="flex-1 py-3 rounded-md border border-rule font-sans text-[14px] font-medium text-ink-2 hover:border-ink hover:text-ink transition-colors active:scale-[0.99]"
         >
           Again
         </button>
         <button
           onClick={onCorrect}
-          className="flex-1 py-3 rounded-md bg-sage text-card font-sans text-sm font-medium hover:opacity-90 transition-opacity active:scale-[0.99]"
+          className="flex-1 py-3 rounded-md bg-sage text-card font-sans text-[14px] font-medium hover:opacity-90 transition-opacity active:scale-[0.99]"
         >
           Got it
         </button>
@@ -625,32 +761,40 @@ function NoContent({
 }) {
   if (status === 'empty') {
     return (
-      <div className="border border-rule rounded-md bg-card p-6 text-center">
-        <p className="font-serif text-base font-semibold text-ink mb-2">No source content</p>
-        <p className="font-sans text-sm text-ink-2">Add content via the Ingest page to generate {type}.</p>
+      <div className="rounded-md border border-rule bg-card p-6 text-center">
+        <p className="font-serif text-base font-medium text-ink mb-2">No source content</p>
+        <p className="font-sans text-[14px] text-ink-2">Add content via the Ingest page to generate {type}.</p>
       </div>
     );
   }
   if (status === 'generating') {
     if (generationError) {
       return (
-        <div className="border border-rule rounded-md bg-card p-6 text-center space-y-2">
-          <p className="font-sans text-sm text-ink">Generation is taking longer than expected.</p>
-          <p className="font-sans text-sm text-ink-2">Refresh the page in a moment to check for {type}.</p>
+        <div className="rounded-md border border-rule bg-card p-6 text-center space-y-2">
+          <p className="font-sans text-[14px] text-ink">Generation is taking longer than expected.</p>
+          <p className="font-sans text-[14px] text-ink-2">Refresh the page in a moment to check for {type}.</p>
         </div>
       );
     }
     return (
-      <div className="border border-rule rounded-md bg-card p-6 text-center space-y-2">
+      <div className="rounded-md border border-rule bg-card p-6 text-center space-y-3">
         <Spinner />
-        <p className="font-sans text-sm text-ink-2">Generating {type}…</p>
+        <p className="font-sans text-[14px] text-ink-2">Generating {type}…</p>
       </div>
     );
   }
   return (
-    <div className="border border-rule rounded-md bg-card p-6 text-center">
-      <p className="font-sans text-sm text-ink-2">No {type} found.</p>
+    <div className="rounded-md border border-rule bg-card p-6 text-center">
+      <p className="font-sans text-[14px] text-ink-2">No {type} found.</p>
     </div>
+  );
+}
+
+function BookIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+    </svg>
   );
 }
 

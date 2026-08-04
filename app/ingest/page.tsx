@@ -61,7 +61,6 @@ export default function IngestPage() {
     const section = sections.find((s) => s.id === sectionId);
     if (!section) return;
 
-    // Step 1: Save source immediately — this must not be lost
     setStep('saving');
     const lesson = await db.createLesson(supabase, {
       section_id: sectionId,
@@ -78,8 +77,6 @@ export default function IngestPage() {
 
     setSavedLessonId(lesson.id);
     setSavedSectionSlug(section.slug);
-
-    // Step 2: Watch the DB row — generation state comes from the row, not the fetch promise
     setStep('generating');
 
     const channel = supabase
@@ -98,7 +95,6 @@ export default function IngestPage() {
 
     channelRef.current = channel;
 
-    // 3-minute timeout: source is saved regardless — surface the delay
     timeoutRef.current = setTimeout(() => {
       cleanup();
       setErrorMsg(
@@ -107,7 +103,6 @@ export default function IngestPage() {
       setStep('done');
     }, 3 * 60 * 1000);
 
-    // Fire-and-forget: the DB write (and realtime event) drives the UI, not this response
     fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -134,23 +129,23 @@ export default function IngestPage() {
   return (
     <div className="min-h-dvh bg-paper pb-28">
       <header className="bg-card border-b border-rule px-5 py-3.5">
-        <h1 className="font-serif text-lg font-semibold text-ink tracking-tight">Add Lesson</h1>
-        <p className="font-sans text-xs text-ink-2 mt-0.5">Paste content — source is saved immediately</p>
+        <h1 className="font-serif text-lg font-medium text-ink">Add lesson</h1>
+        <p className="font-sans text-[12px] text-ink-2 mt-0.5">Paste content — source is saved immediately</p>
       </header>
 
       <div className="max-w-lg mx-auto px-5 py-6 space-y-5">
 
         {/* Done state */}
         {step === 'done' && savedLessonId && savedSectionSlug && (
-          <div className="border border-rule rounded-md bg-card p-6 space-y-5">
+          <div className="rounded-md border border-rule bg-card p-6 space-y-5">
             <div>
               <div className="flex items-center gap-2 mb-2">
-                <span className="font-sans text-sm text-sage font-semibold">Saved</span>
-                {!errorMsg && <span className="font-sans text-sm text-ink-2">· generation complete</span>}
+                <span className="font-sans text-[13px] text-sage font-medium">Saved</span>
+                {!errorMsg && <span className="font-sans text-[13px] text-ink-2">· generation complete</span>}
               </div>
-              <p className="font-serif text-xl font-semibold text-ink leading-snug">{title}</p>
+              <p className="font-serif text-xl font-medium text-ink leading-snug">{title}</p>
               {errorMsg && (
-                <p className="font-sans text-xs text-ink-2 mt-2 leading-relaxed border border-rule rounded px-3 py-2 bg-paper">
+                <p className="font-sans text-[13px] text-ink-2 mt-2 leading-relaxed rounded-md border border-rule px-3 py-2 bg-paper">
                   {errorMsg}
                 </p>
               )}
@@ -158,19 +153,19 @@ export default function IngestPage() {
             <div className="space-y-2">
               <a
                 href={`/lessons/${savedLessonId}`}
-                className="block w-full py-2.5 rounded-md bg-accent text-card font-sans text-sm font-medium text-center hover:opacity-90 transition-opacity"
+                className="block w-full py-2.5 rounded-md bg-accent text-card font-sans text-[14px] font-medium text-center hover:opacity-90 transition-opacity"
               >
-                View Lesson →
+                View lesson →
               </a>
               <a
                 href={`/sections/${savedSectionSlug}`}
-                className="block w-full py-2.5 rounded-md border border-rule font-sans text-sm font-medium text-ink-2 text-center hover:border-ink-2 hover:text-ink transition-colors"
+                className="block w-full py-2.5 rounded-md border border-rule font-sans text-[14px] font-medium text-ink-2 text-center hover:border-ink-2 hover:text-ink transition-colors"
               >
                 All lessons in section
               </a>
               <button
                 onClick={resetForNext}
-                className="w-full py-2.5 rounded-md border border-rule font-sans text-sm font-medium text-ink-2 text-center hover:border-ink-2 hover:text-ink transition-colors"
+                className="w-full py-2.5 rounded-md border border-rule font-sans text-[14px] font-medium text-ink-2 text-center hover:border-ink-2 hover:text-ink transition-colors"
               >
                 Paste next lesson
               </button>
@@ -182,51 +177,46 @@ export default function IngestPage() {
         {(step === 'form' || step === 'saving' || step === 'generating' || step === 'error') && (
           <div className="space-y-5">
             {errorMsg && step === 'error' && (
-              <div className="border border-rule rounded-md bg-paper px-4 py-3 font-sans text-sm text-ink">
+              <div className="rounded-md border border-rule bg-callout px-4 py-3 font-sans text-[14px] text-ink">
                 {errorMsg}
               </div>
             )}
 
-            {/* Section picker */}
             <div className="space-y-1.5">
-              <label className="font-sans text-xs font-semibold uppercase tracking-wider text-ink-2">Section</label>
+              <label className="font-sans text-[12px] font-medium text-ink-2">Section</label>
               <select
                 value={sectionId}
                 onChange={(e) => setSectionId(e.target.value)}
                 disabled={step !== 'form' && step !== 'error'}
-                className="w-full px-3 py-2.5 rounded-md border border-rule bg-card font-sans text-sm text-ink focus:outline-none focus:border-accent transition-colors disabled:opacity-60"
+                className="w-full px-3 py-2.5 rounded-md border border-rule bg-card font-sans text-[14px] text-ink focus:outline-none focus:border-accent transition-colors disabled:opacity-60"
               >
                 {sections.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
+                  <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </select>
             </div>
 
-            {/* Title */}
             <div className="space-y-1.5">
-              <label className="font-sans text-xs font-semibold uppercase tracking-wider text-ink-2">Lesson Title</label>
+              <label className="font-sans text-[12px] font-medium text-ink-2">Lesson title</label>
               <input
                 type="text"
                 placeholder="e.g. TRID Fee Tolerances"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 disabled={step !== 'form' && step !== 'error'}
-                className="w-full px-3 py-2.5 rounded-md border border-rule bg-card font-sans text-sm text-ink placeholder:text-ink-2/50 focus:outline-none focus:border-accent transition-colors disabled:opacity-60"
+                className="w-full px-3 py-2.5 rounded-md border border-rule bg-card font-sans text-[14px] text-ink placeholder:text-ink-2/50 focus:outline-none focus:border-accent transition-colors disabled:opacity-60"
               />
             </div>
 
-            {/* Source content */}
             <div className="space-y-1.5">
-              <label className="font-sans text-xs font-semibold uppercase tracking-wider text-ink-2">Source Content</label>
+              <label className="font-sans text-[12px] font-medium text-ink-2">Source content</label>
               <textarea
                 rows={16}
                 placeholder="Paste the prep guide text here…"
                 value={sourceContent}
                 onChange={(e) => setSourceContent(e.target.value)}
                 disabled={step !== 'form' && step !== 'error'}
-                className="w-full px-3 py-2.5 rounded-md border border-rule bg-card font-sans text-sm text-ink placeholder:text-ink-2/50 focus:outline-none focus:border-accent transition-colors resize-none leading-relaxed disabled:opacity-60"
+                className="w-full px-3 py-2.5 rounded-md border border-rule bg-card font-sans text-[14px] text-ink placeholder:text-ink-2/50 focus:outline-none focus:border-accent transition-colors resize-none leading-relaxed disabled:opacity-60"
               />
               <div className="flex items-center justify-between">
                 <p className="font-sans text-[11px] text-ink-2 tabular-nums">
@@ -243,7 +233,7 @@ export default function IngestPage() {
             <button
               onClick={handleSubmit}
               disabled={!canSubmit || (step !== 'form' && step !== 'error')}
-              className="w-full py-3 rounded-md bg-accent text-card font-sans text-sm font-medium hover:opacity-90 disabled:opacity-40 transition-opacity active:scale-[0.99]"
+              className="w-full py-3 rounded-md bg-accent text-card font-sans text-[14px] font-medium hover:opacity-90 disabled:opacity-40 transition-opacity active:scale-[0.99]"
             >
               {step === 'saving' ? (
                 <span className="flex items-center justify-center gap-2">
@@ -259,7 +249,7 @@ export default function IngestPage() {
             </button>
 
             {step === 'generating' && (
-              <p className="font-sans text-[11px] text-ink-2 text-center leading-relaxed">
+              <p className="font-sans text-[12px] text-ink-2 text-center leading-relaxed">
                 Source is already saved. You can close this tab — generation will finish in the background.
               </p>
             )}

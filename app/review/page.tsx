@@ -71,8 +71,8 @@ export default function ReviewPage() {
   return (
     <div className="min-h-dvh bg-paper pb-28">
       <header className="bg-card border-b border-rule px-5 py-3.5">
-        <h1 className="font-serif text-lg font-semibold text-ink tracking-tight">Review</h1>
-        <p className="font-sans text-xs text-ink-2 mt-0.5">
+        <h1 className="font-serif text-lg font-medium text-ink">Review</h1>
+        <p className="font-sans text-[12px] text-ink-2 mt-0.5">
           {done || queue.length === 0
             ? sessionTotal > 0 ? `${sessionCorrect}/${sessionTotal} correct this session` : 'All caught up'
             : `${queue.length} cards due · ${idx + 1} of ${queue.length}`}
@@ -81,49 +81,49 @@ export default function ReviewPage() {
 
       <div className="max-w-lg mx-auto px-5 py-8">
         {queue.length === 0 && !loading ? (
-          <div className="border border-rule rounded-md bg-card p-8 text-center space-y-4">
-            <p className="font-serif text-2xl font-semibold text-ink">All caught up</p>
-            <p className="font-sans text-sm text-ink-2 leading-relaxed">
-              No cards are due right now. Great work — come back tomorrow to keep your streak going.
+          <div className="rounded-md border border-rule bg-card p-8 text-center space-y-4">
+            <p className="font-serif text-2xl font-medium text-ink">All caught up</p>
+            <p className="font-sans text-[15px] text-ink-2 leading-relaxed">
+              No cards are due right now. Come back tomorrow to keep your streak going.
             </p>
             <Link
               href="/"
-              className="inline-block mt-2 px-5 py-2.5 rounded-md border border-rule font-sans text-sm font-medium text-ink-2 hover:border-ink-2 hover:text-ink transition-colors"
+              className="inline-block mt-2 px-5 py-2.5 rounded-md border border-rule font-sans text-[14px] font-medium text-ink-2 hover:border-ink-2 hover:text-ink transition-colors"
             >
               Back to home
             </Link>
           </div>
         ) : done ? (
-          <div className="border border-rule rounded-md bg-card p-8 text-center space-y-4">
-            <p className="font-serif text-2xl font-semibold text-ink">Session complete</p>
+          <div className="rounded-md border border-rule bg-card p-8 text-center space-y-4">
+            <p className="font-serif text-2xl font-medium text-ink">Session complete</p>
             <div className="flex items-center justify-center gap-6 py-2">
               <div>
-                <p className="font-sans tabular-nums text-3xl font-semibold text-ink">{sessionCorrect}</p>
-                <p className="font-sans text-xs text-sage mt-1">Correct</p>
+                <p className="font-sans tabular-nums text-3xl font-medium text-ink">{sessionCorrect}</p>
+                <p className="font-sans text-[12px] text-sage mt-1">Correct</p>
               </div>
               <div className="w-px h-10 bg-rule" />
               <div>
-                <p className="font-sans tabular-nums text-3xl font-semibold text-ink">{sessionTotal - sessionCorrect}</p>
-                <p className="font-sans text-xs text-ink-2 mt-1">Again</p>
+                <p className="font-sans tabular-nums text-3xl font-medium text-ink">{sessionTotal - sessionCorrect}</p>
+                <p className="font-sans text-[12px] text-ink-2 mt-1">Again</p>
               </div>
               <div className="w-px h-10 bg-rule" />
               <div>
-                <p className="font-sans tabular-nums text-3xl font-semibold text-ink">
+                <p className="font-sans tabular-nums text-3xl font-medium text-ink">
                   {Math.round((sessionCorrect / sessionTotal) * 100)}%
                 </p>
-                <p className="font-sans text-xs text-ink-2 mt-1">Accuracy</p>
+                <p className="font-sans text-[12px] text-ink-2 mt-1">Accuracy</p>
               </div>
             </div>
             <div className="space-y-2 pt-2">
               <Link
                 href="/"
-                className="block w-full py-2.5 rounded-md bg-accent text-card font-sans text-sm font-medium text-center hover:opacity-90 transition-opacity"
+                className="block w-full py-2.5 rounded-md bg-accent text-card font-sans text-[14px] font-medium text-center hover:opacity-90 transition-opacity"
               >
                 Done
               </Link>
               <Link
                 href="/ingest"
-                className="block w-full py-2.5 rounded-md border border-rule font-sans text-sm font-medium text-ink-2 text-center hover:border-ink-2 hover:text-ink transition-colors"
+                className="block w-full py-2.5 rounded-md border border-rule font-sans text-[14px] font-medium text-ink-2 text-center hover:border-ink-2 hover:text-ink transition-colors"
               >
                 Add more content
               </Link>
@@ -131,43 +131,40 @@ export default function ReviewPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            {/* Progress bar */}
-            <div className="h-0.75 rounded-sm bg-rule overflow-hidden">
+            <div className="h-1 rounded-sm bg-rule overflow-hidden">
               <div
                 className="h-full bg-accent transition-all duration-300"
                 style={{ width: `${(idx / queue.length) * 100}%` }}
               />
             </div>
 
-            {/* Card */}
             <button
               onClick={() => setFlipped((f) => !f)}
-              className="w-full min-h-52 border border-rule rounded-md bg-card p-8 text-left cursor-pointer hover:bg-paper transition-colors"
+              className="w-full min-h-52 rounded-md border border-rule bg-card p-8 text-left cursor-pointer hover:bg-paper transition-colors"
             >
-              <p className="font-sans text-[10px] font-semibold uppercase tracking-wider text-ink-2 mb-4">
+              <p className="font-sans text-[11px] font-medium text-ink-2 uppercase tracking-wide mb-4">
                 {flipped ? 'Answer' : 'Description'}
               </p>
               <p className="font-serif text-ink text-lg leading-relaxed">
                 {flipped ? queue[idx].back : queue[idx].front}
               </p>
               {!flipped && (
-                <p className="font-sans text-[11px] text-ink-2/60 mt-6">Tap to reveal</p>
+                <p className="font-sans text-[12px] text-ink-2/60 mt-6">Tap to reveal</p>
               )}
             </button>
 
-            {/* Buttons */}
             <div
               className={`flex gap-3 transition-all duration-150 ${flipped ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
             >
               <button
                 onClick={() => handleAnswer(false)}
-                className="flex-1 py-3 rounded-md border border-rule font-sans text-sm font-medium text-ink-2 hover:border-ink hover:text-ink transition-colors active:scale-[0.99]"
+                className="flex-1 py-3 rounded-md border border-rule font-sans text-[14px] font-medium text-ink-2 hover:border-ink hover:text-ink transition-colors active:scale-[0.99]"
               >
                 Again
               </button>
               <button
                 onClick={() => handleAnswer(true)}
-                className="flex-1 py-3 rounded-md bg-sage text-card font-sans text-sm font-medium hover:opacity-90 transition-opacity active:scale-[0.99]"
+                className="flex-1 py-3 rounded-md bg-sage text-card font-sans text-[14px] font-medium hover:opacity-90 transition-opacity active:scale-[0.99]"
               >
                 Got it
               </button>
@@ -176,7 +173,7 @@ export default function ReviewPage() {
             {queue[idx].source_anchor && flipped && (
               <Link
                 href={`/lessons/${(queue[idx] as Flashcard & { lesson_id: string }).lesson_id}?tab=source`}
-                className="block font-sans text-[11px] text-ink-2 hover:text-accent italic transition-colors text-center"
+                className="block font-sans text-[12px] text-ink-2 hover:text-accent italic transition-colors text-center"
               >
                 "{queue[idx].source_anchor?.slice(0, 60)}…" →
               </Link>

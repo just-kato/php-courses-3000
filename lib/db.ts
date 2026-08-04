@@ -320,3 +320,23 @@ export async function getAttempts(
   if (error) { console.error('[db] getAttempts', error.message); return []; }
   return data as Attempt[];
 }
+
+// ── Textbook search ───────────────────────────────────────────────────────────
+
+export type TextbookChunk = {
+  id: string;
+  content: string;
+  heading: string | null;
+  chapter: string | null;
+  chunk_index: number;
+};
+
+export async function searchTextbook(
+  supabase: SupabaseClient,
+  query: string,
+  limit = 5
+): Promise<TextbookChunk[]> {
+  const { data, error } = await supabase.rpc('search_textbook', { q: query.trim(), limit_n: limit });
+  if (error) { console.error('[db] searchTextbook', error.message); return []; }
+  return (data ?? []) as TextbookChunk[];
+}
