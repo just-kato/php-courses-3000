@@ -38,6 +38,7 @@ export default function LessonPage() {
   const [cards, setCards] = useState<Flashcard[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(true);
+  const [generationError, setGenerationError] = useState(false);
 
   // Flashcard review state
   const [reviewQueue, setReviewQueue] = useState<Flashcard[]>([]);
@@ -55,7 +56,21 @@ export default function LessonPage() {
   // Source anchor highlight ref
   const sourceRef = useRef<HTMLDivElement>(null);
 
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
+    function cleanup() {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    }
+
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) { router.push('/sign-in'); return; }
 
@@ -81,7 +96,46 @@ export default function LessonPage() {
       setReviewQueue(due);
       setReviewIdx(0);
       setLoading(false);
+
+      // If still generating, subscribe so the UI reacts when generated_at is set
+      if (lessonStatus(lessonData) === 'generating') {
+        const channel = supabase
+          .channel(`lesson-gen-${lessonData.id}`)
+          .on(
+            'postgres_changes',
+            { event: 'UPDATE', schema: 'public', table: 'lessons', filter: `id=eq.${lessonData.id}` },
+            async (payload) => {
+              if (!(payload.new as Lesson).generated_at) return;
+
+              // Fetch fresh data now that generation is complete
+              const [freshLesson, freshCards, freshQuestions] = await Promise.all([
+                db.getLessonById(supabase, id),
+                db.getFlashcards(supabase, id),
+                db.getQuestions(supabase, id),
+              ]);
+
+              if (freshLesson) setLesson(freshLesson);
+              setCards(freshCards);
+              setQuestions(freshQuestions);
+              setReviewQueue(filterDue(freshCards));
+              setReviewIdx(0);
+              cleanup();
+            }
+          )
+          .subscribe();
+
+        channelRef.current = channel;
+
+        // 3-minute timeout: surface the stall instead of spinning forever
+        timeoutRef.current = setTimeout(() => {
+          cleanup();
+          setGenerationError(true);
+        }, 3 * 60 * 1000);
+      }
     });
+
+    return cleanup;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase, router, id]);
 
   // ── Flashcard review handlers ──────────────────────────────────────────────
@@ -257,14 +311,26 @@ export default function LessonPage() {
           <div>
             {status === 'empty' || status === 'generating' ? (
               <div className="border border-rule rounded-md bg-card p-6 text-center space-y-3">
-                <p className="font-serif text-base font-semibold text-ink">
-                  {status === 'generating' ? 'Generating…' : 'Not yet generated'}
-                </p>
-                <p className="font-sans text-sm text-ink-2">
-                  {status === 'generating'
-                    ? 'Check back in a moment.'
-                    : 'Add source content and generate to see the explainer.'}
-                </p>
+                {generationError ? (
+                  <>
+                    <p className="font-serif text-base font-semibold text-ink">Generation stalled</p>
+                    <p className="font-sans text-sm text-ink-2">
+                      Refresh the page in a moment to check if it finished.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-serif text-base font-semibold text-ink">
+                      {status === 'generating' ? 'Generating…' : 'Not yet generated'}
+                    </p>
+                    <p className="font-sans text-sm text-ink-2">
+                      {status === 'generating'
+                        ? 'Check back in a moment.'
+                        : 'Add source content and generate to see the explainer.'}
+                    </p>
+                    {status === 'generating' && <Spinner />}
+                  </>
+                )}
               </div>
             ) : (
               <div className="space-y-4">
@@ -301,7 +367,7 @@ export default function LessonPage() {
         {tab === 'flashcards' && (
           <div>
             {cards.length === 0 ? (
-              <NoContent status={status} type="cards" />
+              <NoContent status={status} type="cards" generationError={generationError} />
             ) : reviewDone || reviewQueue.length === 0 ? (
               <div className="border border-rule rounded-md bg-card p-6 space-y-4 text-center">
                 <p className="font-serif text-xl font-semibold text-ink">
@@ -360,7 +426,7 @@ export default function LessonPage() {
         {tab === 'practice' && (
           <div className="space-y-5">
             {questions.length === 0 ? (
-              <NoContent status={status} type="questions" />
+              <NoContent status={status} type="questions" generationError={generationError} />
             ) : (
               <>
                 {/* Type filter */}
@@ -548,7 +614,15 @@ function FlashcardReview({
   );
 }
 
-function NoContent({ status, type }: { status: ReturnType<typeof lessonStatus>; type: 'cards' | 'questions' }) {
+function NoContent({
+  status,
+  type,
+  generationError,
+}: {
+  status: ReturnType<typeof lessonStatus>;
+  type: 'cards' | 'questions';
+  generationError?: boolean;
+}) {
   if (status === 'empty') {
     return (
       <div className="border border-rule rounded-md bg-card p-6 text-center">
@@ -558,10 +632,18 @@ function NoContent({ status, type }: { status: ReturnType<typeof lessonStatus>; 
     );
   }
   if (status === 'generating') {
+    if (generationError) {
+      return (
+        <div className="border border-rule rounded-md bg-card p-6 text-center space-y-2">
+          <p className="font-sans text-sm text-ink">Generation is taking longer than expected.</p>
+          <p className="font-sans text-sm text-ink-2">Refresh the page in a moment to check for {type}.</p>
+        </div>
+      );
+    }
     return (
       <div className="border border-rule rounded-md bg-card p-6 text-center space-y-2">
         <Spinner />
-        <p className="font-sans text-sm text-ink-2">Generating {type}… check back in a moment.</p>
+        <p className="font-sans text-sm text-ink-2">Generating {type}…</p>
       </div>
     );
   }

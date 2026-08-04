@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase/client';
 import { BottomNav } from '@/components/BottomNav';
 import * as db from '@/lib/db';
-import type { Section } from '@/lib/db-types';
+import type { Lesson, Section } from '@/lib/db-types';
 
 type Step = 'form' | 'saving' | 'generating' | 'done' | 'error';
 
@@ -25,6 +25,20 @@ export default function IngestPage() {
   const [savedLessonId, setSavedLessonId] = useState<string | null>(null);
   const [savedSectionSlug, setSavedSectionSlug] = useState<string | null>(null);
 
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function cleanup() {
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }
+
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) { router.push('/sign-in'); return; }
@@ -33,6 +47,8 @@ export default function IngestPage() {
       setSections(sects);
       if (sects.length > 0) setSectionId(sects[0].id);
     });
+    return cleanup;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase, router]);
 
   const wordCount = sourceContent.trim() ? sourceContent.trim().split(/\s+/).length : 0;
@@ -60,32 +76,50 @@ export default function IngestPage() {
       return;
     }
 
-    // Step 2: Trigger generation async
-    setStep('generating');
-    try {
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lessonId: lesson.id,
-          title: lesson.title,
-          sourceContent: lesson.source_content,
-          questionMix: section.question_mix,
-        }),
-      });
-      const json = await res.json() as { ok?: boolean; error?: string };
-      if (!res.ok || json.error) throw new Error(json.error ?? 'Generation failed');
-    } catch (err) {
-      // Generation failed but source is already saved — user can regenerate from lesson
-      setErrorMsg(
-        `Generation failed: ${err instanceof Error ? err.message : 'unknown error'}. ` +
-        'Your source content is saved — you can regenerate from the lesson page.'
-      );
-    }
-
     setSavedLessonId(lesson.id);
     setSavedSectionSlug(section.slug);
-    setStep('done');
+
+    // Step 2: Watch the DB row — generation state comes from the row, not the fetch promise
+    setStep('generating');
+
+    const channel = supabase
+      .channel(`ingest-gen-${lesson.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'lessons', filter: `id=eq.${lesson.id}` },
+        (payload) => {
+          if ((payload.new as Lesson).generated_at) {
+            cleanup();
+            setStep('done');
+          }
+        }
+      )
+      .subscribe();
+
+    channelRef.current = channel;
+
+    // 3-minute timeout: source is saved regardless — surface the delay
+    timeoutRef.current = setTimeout(() => {
+      cleanup();
+      setErrorMsg(
+        'Generation is taking longer than expected. Your source content is saved — check the lesson page in a moment.'
+      );
+      setStep('done');
+    }, 3 * 60 * 1000);
+
+    // Fire-and-forget: the DB write (and realtime event) drives the UI, not this response
+    fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lessonId: lesson.id,
+        title: lesson.title,
+        sourceContent: lesson.source_content,
+        questionMix: section.question_mix,
+      }),
+    }).catch(() => {
+      // Request may be cancelled by navigation — realtime subscription handles completion
+    });
   }
 
   function resetForNext() {
