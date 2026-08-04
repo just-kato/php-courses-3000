@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { CheckCircle } from '@phosphor-icons/react';
 import { createClient } from '@/utils/supabase/client';
-import { BottomNav } from '@/components/BottomNav';
+import { AppNav } from '@/components/AppNav';
 import * as db from '@/lib/db';
 import type { Lesson, Section } from '@/lib/db-types';
 
@@ -29,14 +30,8 @@ export default function IngestPage() {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function cleanup() {
-    if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
-      channelRef.current = null;
-    }
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
+    if (channelRef.current) { supabase.removeChannel(channelRef.current); channelRef.current = null; }
+    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
   }
 
   useEffect(() => {
@@ -53,6 +48,7 @@ export default function IngestPage() {
 
   const wordCount = sourceContent.trim() ? sourceContent.trim().split(/\s+/).length : 0;
   const canSubmit = sectionId && title.trim() && sourceContent.trim().length > 50;
+  const isActive = step === 'form' || step === 'error';
 
   async function handleSubmit() {
     if (!userId || !canSubmit) return;
@@ -69,11 +65,7 @@ export default function IngestPage() {
       source_content: sourceContent,
     });
 
-    if (!lesson) {
-      setErrorMsg('Failed to save lesson. Please try again.');
-      setStep('error');
-      return;
-    }
+    if (!lesson) { setErrorMsg('Failed to save. Please try again.'); setStep('error'); return; }
 
     setSavedLessonId(lesson.id);
     setSavedSectionSlug(section.slug);
@@ -85,21 +77,15 @@ export default function IngestPage() {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'lessons', filter: `id=eq.${lesson.id}` },
         (payload) => {
-          if ((payload.new as Lesson).generated_at) {
-            cleanup();
-            setStep('done');
-          }
+          if ((payload.new as Lesson).generated_at) { cleanup(); setStep('done'); }
         }
       )
       .subscribe();
-
     channelRef.current = channel;
 
     timeoutRef.current = setTimeout(() => {
       cleanup();
-      setErrorMsg(
-        'Generation is taking longer than expected. Your source content is saved — check the lesson page in a moment.'
-      );
+      setErrorMsg('Generation is taking longer than expected. Your source is saved — check the lesson in a moment.');
       setStep('done');
     }, 3 * 60 * 1000);
 
@@ -112,152 +98,133 @@ export default function IngestPage() {
         sourceContent: lesson.source_content,
         questionMix: section.question_mix,
       }),
-    }).catch(() => {
-      // Request may be cancelled by navigation — realtime subscription handles completion
-    });
+    }).catch(() => {});
   }
 
   function resetForNext() {
-    setTitle('');
-    setSourceContent('');
-    setErrorMsg(null);
-    setSavedLessonId(null);
-    setSavedSectionSlug(null);
-    setStep('form');
+    setTitle(''); setSourceContent(''); setErrorMsg(null);
+    setSavedLessonId(null); setSavedSectionSlug(null); setStep('form');
   }
 
   return (
-    <div className="min-h-dvh bg-paper pb-28">
-      <header className="bg-card border-b border-rule px-5 py-3.5">
-        <h1 className="font-serif text-lg font-medium text-ink">Add lesson</h1>
-        <p className="font-sans text-[12px] text-ink-2 mt-0.5">Paste content — source is saved immediately</p>
-      </header>
+    <div className="min-h-dvh bg-bg pb-24 md:pb-8">
+      <AppNav />
 
-      <div className="max-w-lg mx-auto px-5 py-6 space-y-5">
+      <div className="md:ml-56 flex flex-col md:flex-row min-h-dvh">
+        {/* ── Left: form ── */}
+        <div className="flex-1 max-w-2xl mx-auto w-full px-5 py-6 space-y-5">
+          <header>
+            <h1 className="text-[17px] font-medium text-fg">Add lesson</h1>
+            <p className="text-[13px] text-n500 mt-0.5">Paste content — source is saved immediately</p>
+          </header>
 
-        {/* Done state */}
-        {step === 'done' && savedLessonId && savedSectionSlug && (
-          <div className="rounded-md border border-rule bg-card p-6 space-y-5">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="font-sans text-[13px] text-sage font-medium">Saved</span>
-                {!errorMsg && <span className="font-sans text-[13px] text-ink-2">· generation complete</span>}
+          {/* Done state */}
+          {step === 'done' && savedLessonId && savedSectionSlug && (
+            <div className="rounded-lg p-6 space-y-5" style={{ background: 'var(--color-surface)' }}>
+              <div className="flex items-center gap-2">
+                <CheckCircle size={18} weight="fill" style={{ color: 'var(--color-accent-md)' }} />
+                <span className="text-[14px] font-medium" style={{ color: 'var(--color-accent-md)' }}>Saved</span>
+                {!errorMsg && <span className="text-[13px] text-n600">· generation complete</span>}
               </div>
-              <p className="font-serif text-xl font-medium text-ink leading-snug">{title}</p>
+              <p className="text-[17px] font-medium text-fg leading-snug">{title}</p>
               {errorMsg && (
-                <p className="font-sans text-[13px] text-ink-2 mt-2 leading-relaxed rounded-md border border-rule px-3 py-2 bg-paper">
+                <p className="text-[13px] text-n500 leading-relaxed rounded-lg px-4 py-3"
+                  style={{ background: 'var(--color-bg)' }}>
                   {errorMsg}
                 </p>
               )}
-            </div>
-            <div className="space-y-2">
-              <a
-                href={`/lessons/${savedLessonId}`}
-                className="block w-full py-2.5 rounded-md bg-accent text-card font-sans text-[14px] font-medium text-center hover:opacity-90 transition-opacity"
-              >
-                View lesson →
-              </a>
-              <a
-                href={`/sections/${savedSectionSlug}`}
-                className="block w-full py-2.5 rounded-md border border-rule font-sans text-[14px] font-medium text-ink-2 text-center hover:border-ink-2 hover:text-ink transition-colors"
-              >
-                All lessons in section
-              </a>
-              <button
-                onClick={resetForNext}
-                className="w-full py-2.5 rounded-md border border-rule font-sans text-[14px] font-medium text-ink-2 text-center hover:border-ink-2 hover:text-ink transition-colors"
-              >
-                Paste next lesson
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Form */}
-        {(step === 'form' || step === 'saving' || step === 'generating' || step === 'error') && (
-          <div className="space-y-5">
-            {errorMsg && step === 'error' && (
-              <div className="rounded-md border border-rule bg-callout px-4 py-3 font-sans text-[14px] text-ink">
-                {errorMsg}
-              </div>
-            )}
-
-            <div className="space-y-1.5">
-              <label className="font-sans text-[12px] font-medium text-ink-2">Section</label>
-              <select
-                value={sectionId}
-                onChange={(e) => setSectionId(e.target.value)}
-                disabled={step !== 'form' && step !== 'error'}
-                className="w-full px-3 py-2.5 rounded-md border border-rule bg-card font-sans text-[14px] text-ink focus:outline-none focus:border-accent transition-colors disabled:opacity-60"
-              >
-                {sections.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="font-sans text-[12px] font-medium text-ink-2">Lesson title</label>
-              <input
-                type="text"
-                placeholder="e.g. TRID Fee Tolerances"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                disabled={step !== 'form' && step !== 'error'}
-                className="w-full px-3 py-2.5 rounded-md border border-rule bg-card font-sans text-[14px] text-ink placeholder:text-ink-2/50 focus:outline-none focus:border-accent transition-colors disabled:opacity-60"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="font-sans text-[12px] font-medium text-ink-2">Source content</label>
-              <textarea
-                rows={16}
-                placeholder="Paste the prep guide text here…"
-                value={sourceContent}
-                onChange={(e) => setSourceContent(e.target.value)}
-                disabled={step !== 'form' && step !== 'error'}
-                className="w-full px-3 py-2.5 rounded-md border border-rule bg-card font-sans text-[14px] text-ink placeholder:text-ink-2/50 focus:outline-none focus:border-accent transition-colors resize-none leading-relaxed disabled:opacity-60"
-              />
-              <div className="flex items-center justify-between">
-                <p className="font-sans text-[11px] text-ink-2 tabular-nums">
-                  {wordCount > 0 ? `${wordCount.toLocaleString()} words` : ''}
-                </p>
-                {wordCount > 0 && (
-                  <p className="font-sans text-[11px] text-ink-2 tabular-nums">
-                    ~{Math.max(12, Math.min(30, Math.round(wordCount / 130)))} questions
-                  </p>
-                )}
+              <div className="space-y-2">
+                <a href={`/lessons/${savedLessonId}`} className="btn btn-primary btn-block">View lesson →</a>
+                <a href={`/sections/${savedSectionSlug}`} className="btn btn-secondary btn-block">Section overview</a>
+                <button onClick={resetForNext} className="btn btn-secondary btn-block">Paste next lesson</button>
               </div>
             </div>
+          )}
 
-            <button
-              onClick={handleSubmit}
-              disabled={!canSubmit || (step !== 'form' && step !== 'error')}
-              className="w-full py-3 rounded-md bg-accent text-card font-sans text-[14px] font-medium hover:opacity-90 disabled:opacity-40 transition-opacity active:scale-[0.99]"
-            >
-              {step === 'saving' ? (
-                <span className="flex items-center justify-center gap-2">
-                  <Spinner /> Saving source…
-                </span>
-              ) : step === 'generating' ? (
-                <span className="flex items-center justify-center gap-2">
-                  <Spinner /> Generating questions &amp; cards…
-                </span>
-              ) : (
-                'Save &amp; Generate'
+          {/* Form */}
+          {(step === 'form' || step === 'saving' || step === 'generating' || step === 'error') && (
+            <div className="space-y-4">
+              {errorMsg && step === 'error' && (
+                <div className="rounded-lg px-4 py-3 text-[13px] text-n400"
+                  style={{ background: 'var(--color-surface)', border: '1px solid var(--color-divider)' }}>
+                  {errorMsg}
+                </div>
               )}
-            </button>
 
-            {step === 'generating' && (
-              <p className="font-sans text-[12px] text-ink-2 text-center leading-relaxed">
-                Source is already saved. You can close this tab — generation will finish in the background.
-              </p>
-            )}
-          </div>
-        )}
+              <div className="field">
+                <label>Section</label>
+                <select
+                  value={sectionId}
+                  onChange={(e) => setSectionId(e.target.value)}
+                  disabled={!isActive}
+                  className="input"
+                  style={{ appearance: 'none' }}
+                >
+                  {sections.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="field">
+                <label>Lesson title</label>
+                <input
+                  type="text"
+                  placeholder="e.g. TRID Fee Tolerances"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  disabled={!isActive}
+                  className="input"
+                />
+              </div>
+
+              <div className="field">
+                <label>Source content</label>
+                <textarea
+                  rows={14}
+                  placeholder="Paste the prep guide text here…"
+                  value={sourceContent}
+                  onChange={(e) => setSourceContent(e.target.value)}
+                  disabled={!isActive}
+                  className="input"
+                  style={{ resize: 'none', lineHeight: '1.65' }}
+                />
+                <div className="flex items-center justify-between mt-1.5">
+                  <p className="text-[11px] text-n700 tabular-nums">
+                    {wordCount > 0 ? `${wordCount.toLocaleString()} words` : ''}
+                  </p>
+                  {wordCount > 0 && (
+                    <p className="text-[11px] text-n700 tabular-nums">
+                      ~{Math.max(12, Math.min(30, Math.round(wordCount / 130)))} questions
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <button
+                onClick={handleSubmit}
+                disabled={!canSubmit || !isActive}
+                className="btn btn-primary btn-block"
+                style={{ paddingTop: '10px', paddingBottom: '10px' }}
+              >
+                {step === 'saving' ? (
+                  <span className="flex items-center gap-2"><Spinner /> Saving source…</span>
+                ) : step === 'generating' ? (
+                  <span className="flex items-center gap-2"><Spinner /> Generating…</span>
+                ) : (
+                  'Save & Generate'
+                )}
+              </button>
+
+              {step === 'generating' && (
+                <p className="text-[12px] text-n600 text-center leading-relaxed">
+                  Source is saved. You can close this tab — generation finishes in the background.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
-
-      <BottomNav />
     </div>
   );
 }

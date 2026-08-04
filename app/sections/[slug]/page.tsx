@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { ArrowLeft } from '@phosphor-icons/react';
 import { createClient } from '@/utils/supabase/client';
-import { BottomNav } from '@/components/BottomNav';
+import { AppNav } from '@/components/AppNav';
 import { CardSkeleton } from '@/components/Skeleton';
 import * as db from '@/lib/db';
 import { lessonStatus } from '@/lib/db-types';
@@ -13,16 +14,9 @@ import type { Section, Lesson, Flashcard } from '@/lib/db-types';
 
 const STATUS_LABEL = {
   empty: 'No source',
-  generating: 'Generating…',
+  generating: 'Generating',
   ready: 'Ready',
-  completed: 'Completed',
-} as const;
-
-const STATUS_CLASS = {
-  empty: 'text-ink-2 border-rule',
-  generating: 'text-accent-deep border-accent/30 bg-accent-soft',
-  ready: 'text-accent border-accent/30 bg-accent-soft',
-  completed: 'text-ink-2 border-rule bg-paper',
+  completed: 'Done',
 } as const;
 
 export default function SectionPage() {
@@ -51,9 +45,7 @@ export default function SectionPage() {
       setSection(sect);
       setLessons(sectionLessons);
 
-      const cardsByLesson = await Promise.all(
-        sectionLessons.map((l) => db.getFlashcards(supabase, l.id))
-      );
+      const cardsByLesson = await Promise.all(sectionLessons.map((l) => db.getFlashcards(supabase, l.id)));
       const counts: Record<string, number> = {};
       sectionLessons.forEach((l, i) => {
         counts[l.id] = filterDue(cardsByLesson[i] as Pick<Flashcard, 'due_at'>[]).length;
@@ -94,140 +86,170 @@ export default function SectionPage() {
   }
 
   const completedCount = lessons.filter((l) => l.completed_at).length;
-  const readyCount = lessons.filter((l) => lessonStatus(l) === 'ready').length;
 
   return (
-    <div className="min-h-dvh bg-paper pb-28">
-      <header className="bg-card border-b border-rule px-5 py-3.5">
-        <Link href="/" className="font-sans text-[12px] text-accent hover:text-accent-deep transition-colors">
-          ← Home
-        </Link>
-        {section ? (
-          <div className="mt-2">
-            <h1 className="font-serif text-lg font-medium text-ink leading-snug">
-              {section.name}
-            </h1>
-            <p className="font-sans text-[12px] text-ink-2 mt-0.5">
-              {Math.round(section.exam_weight * 100)}% of exam ·{' '}
-              {completedCount}/{lessons.length} complete
-              {readyCount > 0 && ` · ${readyCount} ready to study`}
-            </p>
-          </div>
-        ) : (
-          <div className="mt-2 h-5 w-48 animate-pulse rounded bg-rule" />
-        )}
-      </header>
+    <div className="min-h-dvh bg-bg pb-24 md:pb-8">
+      <AppNav />
 
-      <div className="max-w-lg mx-auto px-5 py-6 space-y-3">
-        {loading ? (
-          Array.from({ length: 4 }).map((_, i) => <CardSkeleton key={i} />)
-        ) : lessons.length === 0 ? (
-          <EmptyState sectionId={section?.id} />
-        ) : (
-          lessons.map((lesson) => {
-            const status = lessonStatus(lesson);
-            const due = dueCounts[lesson.id] ?? 0;
-            const isRegenerating = regenerating === lesson.id;
-
-            return (
-              <div
-                key={lesson.id}
-                className="rounded-md border border-rule bg-card overflow-hidden"
-              >
-                <Link
-                  href={`/lessons/${lesson.id}`}
-                  className="flex items-start justify-between gap-4 px-4 py-3 hover:bg-paper transition-colors group"
-                >
-                  <div className="flex-1 min-w-0">
-                    <p className="font-sans text-[15px] font-medium text-ink leading-snug group-hover:text-accent transition-colors">
-                      {lesson.title}
-                    </p>
-                    {status !== 'empty' && (
-                      <p className="font-sans text-[12px] text-ink-2 mt-0.5 tabular-nums">
-                        {due > 0 ? (
-                          <span className="text-accent">{due} due</span>
-                        ) : status === 'completed' ? 'Completed' : 'No cards due'}
-                      </p>
-                    )}
-                  </div>
-                  <span
-                    className={`shrink-0 mt-0.5 font-sans text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded border ${STATUS_CLASS[status]}`}
-                  >
-                    {STATUS_LABEL[status]}
-                  </span>
-                </Link>
-
-                {(status === 'ready' || status === 'completed') && (
-                  <div className="flex items-center border-t border-rule divide-x divide-rule">
-                    <Link
-                      href={`/lessons/${lesson.id}?tab=cards`}
-                      className="flex-1 text-center py-2 font-sans text-[12px] text-ink-2 hover:text-ink hover:bg-paper transition-colors"
-                    >
-                      Cards {due > 0 ? `(${due} due)` : ''}
-                    </Link>
-                    <Link
-                      href={`/lessons/${lesson.id}?tab=practice`}
-                      className="flex-1 text-center py-2 font-sans text-[12px] text-ink-2 hover:text-ink hover:bg-paper transition-colors"
-                    >
-                      Practice
-                    </Link>
-                    <button
-                      onClick={() => handleRegenerate(lesson)}
-                      disabled={isRegenerating}
-                      className="flex-1 text-center py-2 font-sans text-[12px] text-ink-2 hover:text-ink hover:bg-paper transition-colors disabled:opacity-40"
-                    >
-                      {isRegenerating ? 'Generating…' : 'Regenerate'}
-                    </button>
-                  </div>
-                )}
-
-                {status === 'empty' && (
-                  <div className="border-t border-rule px-4 py-2">
-                    <p className="font-sans text-[12px] text-ink-2">
-                      No source content yet.{' '}
-                      <Link href="/ingest" className="text-accent hover:underline">
-                        Add via Ingest
-                      </Link>
-                    </p>
-                  </div>
-                )}
-
-                {status === 'generating' && (
-                  <div className="border-t border-rule px-4 py-2 flex items-center gap-2">
-                    <Spinner />
-                    <p className="font-sans text-[12px] text-ink-2">Generating…</p>
-                  </div>
-                )}
-              </div>
-            );
-          })
-        )}
-
-        <div className="pt-2">
+      <div className="md:ml-56">
+        {/* Header */}
+        <header className="px-5 py-4 md:px-8" style={{ borderBottom: '1px solid var(--color-divider)' }}>
           <Link
-            href="/ingest"
-            className="block w-full text-center py-3 rounded-md border border-rule font-sans text-[14px] font-medium text-ink-2 hover:border-accent hover:text-accent transition-colors"
+            href="/"
+            className="inline-flex items-center gap-1.5 text-[13px] text-n500 hover:text-fg transition-colors mb-3"
           >
-            + Add lesson to this section
+            <ArrowLeft size={14} />
+            Home
           </Link>
+          {section ? (
+            <div>
+              <p className="text-[12px] text-n600 mb-1">{Math.round(section.exam_weight * 100)}% of exam</p>
+              <h1 className="text-[22px] font-medium text-fg leading-snug tracking-[-0.02em]">
+                {section.name}
+              </h1>
+              <p className="text-[13px] text-n500 mt-1 tabular-nums">
+                {completedCount}/{lessons.length} complete
+              </p>
+            </div>
+          ) : (
+            <div className="h-7 w-56 animate-pulse rounded" style={{ background: 'var(--color-n900)' }} />
+          )}
+        </header>
+
+        <div className="max-w-2xl mx-auto px-5 py-6 space-y-2">
+          {loading ? (
+            Array.from({ length: 4 }).map((_, i) => <CardSkeleton key={i} />)
+          ) : lessons.length === 0 ? (
+            <EmptyState sectionId={section?.id} />
+          ) : (
+            lessons.map((lesson, i) => {
+              const status = lessonStatus(lesson);
+              const due = dueCounts[lesson.id] ?? 0;
+              const isRegenerating = regenerating === lesson.id;
+
+              return (
+                <div
+                  key={lesson.id}
+                  className={`rounded-lg overflow-hidden ${i > 0 ? '' : ''}`}
+                  style={{ background: 'var(--color-surface)' }}
+                >
+                  <Link
+                    href={`/lessons/${lesson.id}`}
+                    className="flex items-start justify-between gap-4 px-4 py-3.5 hover:bg-dim transition-colors group"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[15px] font-medium text-fg leading-snug group-hover:text-accent-md transition-colors">
+                        {lesson.title}
+                      </p>
+                      {status !== 'empty' && (
+                        <p className="text-[12px] text-n600 mt-0.5 tabular-nums">
+                          {due > 0
+                            ? <span style={{ color: 'var(--color-accent-md)' }}>{due} due</span>
+                            : status === 'completed' ? 'Completed' : 'No cards due'
+                          }
+                        </p>
+                      )}
+                    </div>
+                    <StatusTag status={status} />
+                  </Link>
+
+                  {(status === 'ready' || status === 'completed') && (
+                    <div
+                      className="flex items-center"
+                      style={{ borderTop: '1px solid var(--color-divider)' }}
+                    >
+                      <Link
+                        href={`/lessons/${lesson.id}?tab=cards`}
+                        className="flex-1 text-center py-2 text-[12px] text-n600 hover:text-fg transition-colors"
+                      >
+                        Cards {due > 0 ? `(${due})` : ''}
+                      </Link>
+                      <div className="w-px h-4" style={{ background: 'var(--color-divider)' }} />
+                      <Link
+                        href={`/lessons/${lesson.id}?tab=practice`}
+                        className="flex-1 text-center py-2 text-[12px] text-n600 hover:text-fg transition-colors"
+                      >
+                        Practice
+                      </Link>
+                      <div className="w-px h-4" style={{ background: 'var(--color-divider)' }} />
+                      <button
+                        onClick={() => handleRegenerate(lesson)}
+                        disabled={isRegenerating}
+                        className="flex-1 text-center py-2 text-[12px] text-n600 hover:text-fg transition-colors disabled:opacity-40"
+                      >
+                        {isRegenerating ? 'Regenerating…' : 'Regenerate'}
+                      </button>
+                    </div>
+                  )}
+
+                  {status === 'empty' && (
+                    <div className="px-4 py-2" style={{ borderTop: '1px solid var(--color-divider)' }}>
+                      <p className="text-[12px] text-n600">
+                        No source.{' '}
+                        <Link href="/ingest" style={{ color: 'var(--color-accent-md)' }}>
+                          Add via Ingest →
+                        </Link>
+                      </p>
+                    </div>
+                  )}
+
+                  {status === 'generating' && (
+                    <div className="px-4 py-2 flex items-center gap-2" style={{ borderTop: '1px solid var(--color-divider)' }}>
+                      <Spinner />
+                      <p className="text-[12px] text-n600">Generating…</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+
+          <div className="pt-2">
+            <Link
+              href="/ingest"
+              className="btn btn-secondary btn-block"
+              style={{ paddingTop: '10px', paddingBottom: '10px' }}
+            >
+              + Add lesson to this section
+            </Link>
+          </div>
         </div>
       </div>
-
-      <BottomNav />
     </div>
+  );
+}
+
+function StatusTag({ status }: { status: 'empty' | 'generating' | 'ready' | 'completed' }) {
+  const styles: Record<string, React.CSSProperties> = {
+    empty:      { background: 'transparent', color: 'var(--color-n700)', border: '1px solid var(--color-divider)' },
+    generating: { background: 'var(--color-accent-dk)', color: 'var(--color-accent-md)', border: 'none' },
+    ready:      { background: 'var(--color-accent-dk)', color: 'var(--color-accent-md)', border: 'none' },
+    completed:  { background: 'var(--color-n900)', color: 'var(--color-n500)', border: 'none' },
+  };
+  const STATUS_LABEL = {
+    empty: 'No source',
+    generating: 'Generating',
+    ready: 'Ready',
+    completed: 'Done',
+  };
+  return (
+    <span className="tag shrink-0 mt-0.5" style={styles[status]}>
+      {STATUS_LABEL[status]}
+    </span>
   );
 }
 
 function EmptyState({ sectionId }: { sectionId?: string }) {
   return (
-    <div className="rounded-md border border-rule bg-card p-6 text-center space-y-3">
-      <p className="font-serif text-xl font-medium text-ink">No lessons yet</p>
-      <p className="font-sans text-[14px] text-ink-2 leading-relaxed">
+    <div className="rounded-lg p-8 text-center space-y-4" style={{ background: 'var(--color-surface)' }}>
+      <p className="text-[20px] font-medium text-fg">No lessons yet</p>
+      <p className="text-[14px] text-n500 leading-relaxed">
         Paste content from the prep guide to generate flashcards and practice questions.
       </p>
       <Link
         href={sectionId ? `/ingest?section=${sectionId}` : '/ingest'}
-        className="inline-block mt-2 px-5 py-2.5 rounded-md bg-accent text-card font-sans text-[14px] font-medium hover:opacity-90 transition-opacity"
+        className="btn btn-primary"
+        style={{ marginTop: '8px' }}
       >
         Add first lesson
       </Link>
@@ -237,7 +259,7 @@ function EmptyState({ sectionId }: { sectionId?: string }) {
 
 function Spinner() {
   return (
-    <svg className="w-3.5 h-3.5 animate-spin text-ink-2" fill="none" viewBox="0 0 24 24">
+    <svg className="w-3.5 h-3.5 animate-spin text-n600" fill="none" viewBox="0 0 24 24">
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
     </svg>

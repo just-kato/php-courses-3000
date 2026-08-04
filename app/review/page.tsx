@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/utils/supabase/client';
-import { BottomNav } from '@/components/BottomNav';
+import { AppNav } from '@/components/AppNav';
 import * as db from '@/lib/db';
 import { scheduleCard, filterDue, shuffle } from '@/lib/srs';
 import type { Flashcard } from '@/lib/db-types';
@@ -55,134 +55,137 @@ export default function ReviewPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="min-h-dvh bg-paper pb-28">
-        <div className="max-w-lg mx-auto px-5 py-20 space-y-4">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-12 animate-pulse rounded bg-rule opacity-40" />
-          ))}
-        </div>
-        <BottomNav />
-      </div>
-    );
-  }
+  const card = queue[idx];
 
   return (
-    <div className="min-h-dvh bg-paper pb-28">
-      <header className="bg-card border-b border-rule px-5 py-3.5">
-        <h1 className="font-serif text-lg font-medium text-ink">Review</h1>
-        <p className="font-sans text-[12px] text-ink-2 mt-0.5">
-          {done || queue.length === 0
-            ? sessionTotal > 0 ? `${sessionCorrect}/${sessionTotal} correct this session` : 'All caught up'
-            : `${queue.length} cards due · ${idx + 1} of ${queue.length}`}
-        </p>
-      </header>
+    <div className="min-h-dvh bg-bg pb-24 md:pb-8">
+      <AppNav />
 
-      <div className="max-w-lg mx-auto px-5 py-8">
-        {queue.length === 0 && !loading ? (
-          <div className="rounded-md border border-rule bg-card p-8 text-center space-y-4">
-            <p className="font-serif text-2xl font-medium text-ink">All caught up</p>
-            <p className="font-sans text-[15px] text-ink-2 leading-relaxed">
-              No cards are due right now. Come back tomorrow to keep your streak going.
-            </p>
-            <Link
-              href="/"
-              className="inline-block mt-2 px-5 py-2.5 rounded-md border border-rule font-sans text-[14px] font-medium text-ink-2 hover:border-ink-2 hover:text-ink transition-colors"
-            >
-              Back to home
-            </Link>
-          </div>
-        ) : done ? (
-          <div className="rounded-md border border-rule bg-card p-8 text-center space-y-4">
-            <p className="font-serif text-2xl font-medium text-ink">Session complete</p>
-            <div className="flex items-center justify-center gap-6 py-2">
-              <div>
-                <p className="font-sans tabular-nums text-3xl font-medium text-ink">{sessionCorrect}</p>
-                <p className="font-sans text-[12px] text-sage mt-1">Correct</p>
+      <div className="md:ml-56">
+        <header
+          className="px-5 py-4 md:px-8"
+          style={{ borderBottom: '1px solid var(--color-divider)' }}
+        >
+          <h1 className="text-[17px] font-medium text-fg">Review</h1>
+          <p className="text-[13px] text-n500 mt-0.5">
+            {loading
+              ? 'Loading…'
+              : done || queue.length === 0
+              ? sessionTotal > 0
+                ? `${sessionCorrect}/${sessionTotal} correct this session`
+                : 'All caught up'
+              : `${idx + 1} of ${queue.length}`}
+          </p>
+        </header>
+
+        <div className="max-w-xl mx-auto px-5 py-8">
+          {loading ? (
+            <div className="space-y-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-12 animate-pulse rounded-lg" style={{ background: 'var(--color-surface)' }} />
+              ))}
+            </div>
+          ) : queue.length === 0 ? (
+            <div className="rounded-lg p-8 text-center space-y-4" style={{ background: 'var(--color-surface)' }}>
+              <p className="text-[22px] font-medium text-fg">All caught up</p>
+              <p className="text-[15px] text-n400 leading-relaxed">
+                No cards are due right now. Come back tomorrow to keep your streak going.
+              </p>
+              <Link href="/" className="btn btn-secondary btn-block mt-4">Back to home</Link>
+            </div>
+          ) : done ? (
+            <div className="rounded-lg p-8 text-center space-y-5" style={{ background: 'var(--color-surface)' }}>
+              <p className="text-[22px] font-medium text-fg">Session complete</p>
+              <div className="flex items-center justify-center gap-8 py-2">
+                <div>
+                  <p className="text-[32px] font-medium text-fg tabular-nums">{sessionCorrect}</p>
+                  <p className="text-[12px] text-n500 mt-1">Correct</p>
+                </div>
+                <div className="w-px h-10" style={{ background: 'var(--color-divider)' }} />
+                <div>
+                  <p className="text-[32px] font-medium text-fg tabular-nums">{sessionTotal - sessionCorrect}</p>
+                  <p className="text-[12px] text-n500 mt-1">Again</p>
+                </div>
+                <div className="w-px h-10" style={{ background: 'var(--color-divider)' }} />
+                <div>
+                  <p className="text-[32px] font-medium text-fg tabular-nums">
+                    {Math.round((sessionCorrect / sessionTotal) * 100)}%
+                  </p>
+                  <p className="text-[12px] text-n500 mt-1">Accuracy</p>
+                </div>
               </div>
-              <div className="w-px h-10 bg-rule" />
-              <div>
-                <p className="font-sans tabular-nums text-3xl font-medium text-ink">{sessionTotal - sessionCorrect}</p>
-                <p className="font-sans text-[12px] text-ink-2 mt-1">Again</p>
+              <Link href="/" className="btn btn-primary btn-block">Done</Link>
+              <Link href="/ingest" className="btn btn-secondary btn-block">Add more content</Link>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Progress bar */}
+              <div className="h-1 rounded-sm overflow-hidden" style={{ background: 'var(--color-n900)' }}>
+                <div
+                  className="h-full rounded-sm transition-all duration-300"
+                  style={{ width: `${(idx / queue.length) * 100}%`, background: 'var(--color-accent)' }}
+                />
               </div>
-              <div className="w-px h-10 bg-rule" />
-              <div>
-                <p className="font-sans tabular-nums text-3xl font-medium text-ink">
-                  {Math.round((sessionCorrect / sessionTotal) * 100)}%
+
+              {/* Card */}
+              <button
+                onClick={() => setFlipped((f) => !f)}
+                className="w-full text-left cursor-pointer transition-colors rounded-lg p-8"
+                style={{
+                  minHeight: '400px',
+                  background: 'var(--color-surface)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}
+              >
+                <p className="text-[11px] font-medium text-n600 uppercase tracking-wide mb-5">
+                  {flipped ? 'Answer' : 'Term'}
                 </p>
-                <p className="font-sans text-[12px] text-ink-2 mt-1">Accuracy</p>
-              </div>
-            </div>
-            <div className="space-y-2 pt-2">
-              <Link
-                href="/"
-                className="block w-full py-2.5 rounded-md bg-accent text-card font-sans text-[14px] font-medium text-center hover:opacity-90 transition-opacity"
-              >
-                Done
-              </Link>
-              <Link
-                href="/ingest"
-                className="block w-full py-2.5 rounded-md border border-rule font-sans text-[14px] font-medium text-ink-2 text-center hover:border-ink-2 hover:text-ink transition-colors"
-              >
-                Add more content
-              </Link>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="h-1 rounded-sm bg-rule overflow-hidden">
+                <p className="text-[24px] font-medium text-fg leading-relaxed flex-1">
+                  {flipped ? card.back : card.front}
+                </p>
+                {!flipped && (
+                  <p className="text-[13px] text-n700 mt-6">Tap to reveal</p>
+                )}
+              </button>
+
+              {/* Answer buttons */}
               <div
-                className="h-full bg-accent transition-all duration-300"
-                style={{ width: `${(idx / queue.length) * 100}%` }}
-              />
-            </div>
+                className={`flex gap-3 transition-all duration-150 ${flipped ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+              >
+                <button
+                  onClick={() => handleAnswer(false)}
+                  className="flex-1 py-3 rounded-lg text-[14px] font-medium text-n400 transition-colors"
+                  style={{ border: '1px solid var(--color-divider)' }}
+                >
+                  Again
+                </button>
+                <button
+                  onClick={() => handleAnswer(true)}
+                  className="flex-1 py-3 rounded-lg text-[14px] font-medium transition-colors"
+                  style={{
+                    background: 'color-mix(in srgb, var(--color-accent) 16%, transparent)',
+                    color: 'var(--color-accent-md)',
+                    border: '1px solid var(--color-accent)',
+                  }}
+                >
+                  Got it
+                </button>
+              </div>
 
-            <button
-              onClick={() => setFlipped((f) => !f)}
-              className="w-full min-h-52 rounded-md border border-rule bg-card p-8 text-left cursor-pointer hover:bg-paper transition-colors"
-            >
-              <p className="font-sans text-[11px] font-medium text-ink-2 uppercase tracking-wide mb-4">
-                {flipped ? 'Answer' : 'Description'}
-              </p>
-              <p className="font-serif text-ink text-lg leading-relaxed">
-                {flipped ? queue[idx].back : queue[idx].front}
-              </p>
-              {!flipped && (
-                <p className="font-sans text-[12px] text-ink-2/60 mt-6">Tap to reveal</p>
+              {/* Source anchor */}
+              {card.source_anchor && flipped && (
+                <Link
+                  href={`/lessons/${card.lesson_id}?tab=source`}
+                  className="block text-[12px] text-n600 hover:text-n400 italic transition-colors text-center"
+                >
+                  &ldquo;{card.source_anchor.slice(0, 60)}&hellip;&rdquo; →
+                </Link>
               )}
-            </button>
-
-            <div
-              className={`flex gap-3 transition-all duration-150 ${flipped ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-            >
-              <button
-                onClick={() => handleAnswer(false)}
-                className="flex-1 py-3 rounded-md border border-rule font-sans text-[14px] font-medium text-ink-2 hover:border-ink hover:text-ink transition-colors active:scale-[0.99]"
-              >
-                Again
-              </button>
-              <button
-                onClick={() => handleAnswer(true)}
-                className="flex-1 py-3 rounded-md bg-sage text-card font-sans text-[14px] font-medium hover:opacity-90 transition-opacity active:scale-[0.99]"
-              >
-                Got it
-              </button>
             </div>
-
-            {queue[idx].source_anchor && flipped && (
-              <Link
-                href={`/lessons/${(queue[idx] as Flashcard & { lesson_id: string }).lesson_id}?tab=source`}
-                className="block font-sans text-[12px] text-ink-2 hover:text-accent italic transition-colors text-center"
-              >
-                "{queue[idx].source_anchor?.slice(0, 60)}…" →
-              </Link>
-            )}
-          </div>
-        )}
+          )}
+        </div>
       </div>
-
-      <BottomNav />
     </div>
   );
 }
