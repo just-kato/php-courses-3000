@@ -6,136 +6,235 @@ import type { QuestionMix } from '@/lib/db-types';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-function buildSystemPrompt(questionMix: QuestionMix, questionCount: number): string {
-  const factualCount = Math.round(questionCount * questionMix.factual);
-  const scenarioCount = Math.round(questionCount * questionMix.scenario);
-  const calcCount = questionCount - factualCount - scenarioCount;
+// Source chunks stay under this limit so the model can produce full JSON within 8192 output tokens
+const CHUNK_LIMIT = 8_000;
 
+// ── Chunk splitter ────────────────────────────────────────────────────────────
+
+function splitOnParagraphs(text: string, limit: number): string[] {
+  if (text.length <= limit) return [text];
+
+  const chunks: string[] = [];
+  let remaining = text.trim();
+
+  while (remaining.length > limit) {
+    const window = remaining.slice(0, limit);
+    // Prefer paragraph break, fall back to line break, then space
+    let breakAt = window.lastIndexOf('\n\n');
+    if (breakAt < limit / 4) breakAt = window.lastIndexOf('\n');
+    if (breakAt < limit / 4) breakAt = window.lastIndexOf(' ');
+    if (breakAt <= 0) breakAt = limit;
+
+    chunks.push(remaining.slice(0, breakAt).trim());
+    remaining = remaining.slice(breakAt).trim();
+  }
+
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
+// ── Prompts ───────────────────────────────────────────────────────────────────
+
+function firstChunkPrompt(mix: QuestionMix, n: number): string {
+  const f = Math.round(n * mix.factual);
+  const s = Math.round(n * mix.scenario);
+  const c = n - f - s;
   return `You are building study material for the NMLS Mortgage Loan Originator (MLO) licensing exam.
 
 Given a lesson title and source text, produce:
 1. A short "why it matters" paragraph (2–4 sentences) explaining why this topic appears on the NMLS exam and what a working MLO needs to know.
-2. Exactly ${questionCount} multiple-choice questions: ${factualCount} factual, ${scenarioCount} scenario, ${calcCount} calculation.
-3. 8–20 flashcards (description→term direction, i.e. front describes a concept/situation, back gives the precise term/rule/number).
+2. Exactly ${n} multiple-choice questions: ${f} factual, ${s} scenario, ${c} calculation.
+3. 8–20 flashcards (description→term: front describes a concept/situation, back gives the precise term/rule/number).
 
-Requirements for questions:
+Question requirements:
 - Use named fictional borrowers (Maria, James, etc.) in scenario questions.
-- All four options must be plausible; wrong answers should be true facts about related topics, not obvious nonsense (true-but-incomplete distractors).
-- Vary qualifiers: avoid starting every stem with "Which of the following".
+- All four options must be plausible; wrong answers should be true facts about related topics (true-but-incomplete distractors).
+- Avoid starting every stem with "Which of the following".
 - Explanation must say why the correct answer is right AND why the best wrong answer fails.
-- For calculation questions, show the full worked arithmetic in the explanation.
-- source_anchor: include a short verbatim quote (≤30 words) from the source text that supports the correct answer.
-
-Question type definitions:
-- factual: tests specific rule, date, threshold, or agency role
-- scenario: describes a realistic situation with a named borrower; asks what the MLO must do
-- calculation: requires arithmetic (APR, DTI, loan amounts, timing, etc.)
+- For calculation questions, show full worked arithmetic in the explanation.
+- source_anchor: a short verbatim quote (≤30 words) from the source that supports the correct answer.
 
 Return strict JSON only — no markdown fences, no preamble:
 {
   "whyItMatters": "string",
   "questions": [
     {
-      "question_type": "factual" | "scenario" | "calculation",
+      "question_type": "factual"|"scenario"|"calculation",
       "stem": "string",
-      "options": ["string", "string", "string", "string"],
+      "options": ["string","string","string","string"],
       "correct_index": 0,
       "explanation": "string",
       "source_anchor": "string"
     }
   ],
   "flashcards": [
-    {
-      "front": "string",
-      "back": "string",
-      "source_anchor": "string"
-    }
+    { "front": "string", "back": "string", "source_anchor": "string" }
   ]
 }`;
 }
 
-export type GenerateResponse = {
+function continuationChunkPrompt(mix: QuestionMix, n: number): string {
+  const f = Math.round(n * mix.factual);
+  const s = Math.round(n * mix.scenario);
+  const c = n - f - s;
+  return `You are building additional study material for the NMLS MLO licensing exam from a continuation of a longer source document.
+
+Produce:
+1. Exactly ${n} multiple-choice questions: ${f} factual, ${s} scenario, ${c} calculation.
+2. 6–14 flashcards (description→term direction).
+
+Apply the same quality requirements: named fictional borrowers, plausible distractors, worked arithmetic, source_anchor ≤30 words verbatim from the source.
+
+Return strict JSON only — no markdown fences:
+{
+  "questions": [
+    {
+      "question_type": "factual"|"scenario"|"calculation",
+      "stem": "string",
+      "options": ["string","string","string","string"],
+      "correct_index": 0,
+      "explanation": "string",
+      "source_anchor": "string"
+    }
+  ],
+  "flashcards": [
+    { "front": "string", "back": "string", "source_anchor": "string" }
+  ]
+}`;
+}
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type FirstChunkResponse = {
   whyItMatters: string;
-  questions: Array<{
-    question_type: 'factual' | 'scenario' | 'calculation';
-    stem: string;
-    options: string[];
-    correct_index: number;
-    explanation: string;
-    source_anchor: string;
-  }>;
-  flashcards: Array<{
-    front: string;
-    back: string;
-    source_anchor: string;
-  }>;
+  questions: QuestionRow[];
+  flashcards: FlashcardRow[];
 };
 
+type ContinuationResponse = {
+  questions: QuestionRow[];
+  flashcards: FlashcardRow[];
+};
+
+type QuestionRow = {
+  question_type: 'factual' | 'scenario' | 'calculation';
+  stem: string;
+  options: string[];
+  correct_index: number;
+  explanation: string;
+  source_anchor: string;
+};
+
+type FlashcardRow = {
+  front: string;
+  back: string;
+  source_anchor: string;
+};
+
+function parseJSON<T>(text: string): T {
+  const clean = text.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, '');
+  return JSON.parse(clean) as T;
+}
+
+// ── Handler ───────────────────────────────────────────────────────────────────
+
 export async function POST(request: NextRequest) {
-  try {
-    const { lessonId, title, sourceContent, questionMix } = await request.json() as {
-      lessonId: string;
-      title: string;
-      sourceContent: string;
-      questionMix: QuestionMix;
-    };
+  const body = await request.json() as {
+    lessonId: string;
+    title: string;
+    sourceContent: string;
+    questionMix: QuestionMix;
+    chunkFrom?: number;   // resume point; default 0 (full restart)
+  };
 
-    if (!sourceContent?.trim()) {
-      return NextResponse.json({ error: 'No source content provided' }, { status: 400 });
-    }
-    if (!lessonId) {
-      return NextResponse.json({ error: 'lessonId required' }, { status: 400 });
-    }
+  const { lessonId, title, sourceContent, questionMix } = body;
+  const chunkFrom = body.chunkFrom ?? 0;
 
-    const wordCount = sourceContent.trim().split(/\s+/).length;
-    const questionCount = Math.max(12, Math.min(30, Math.round(wordCount / 130)));
+  if (!sourceContent?.trim()) {
+    return NextResponse.json({ error: 'No source content provided' }, { status: 400 });
+  }
+  if (!lessonId) {
+    return NextResponse.json({ error: 'lessonId required' }, { status: 400 });
+  }
 
-    const systemPrompt = buildSystemPrompt(questionMix, questionCount);
-    const userMessage = `Lesson: ${title}\n\n${sourceContent.trim()}`;
+  const supabase = await createClient();
+  const chunks = splitOnParagraphs(sourceContent.trim(), CHUNK_LIMIT);
+  const totalWords = sourceContent.trim().split(/\s+/).length;
+  const isMultiChunk = chunks.length > 1;
 
-    const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 8192,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
-    });
+  console.log(`[generate] lesson=${lessonId} chunks=${chunks.length} totalChars=${sourceContent.length} resumeFrom=${chunkFrom}`);
 
-    const block = message.content[0];
-    if (block.type !== 'text') {
-      return NextResponse.json({ error: 'Unexpected response type from model' }, { status: 500 });
-    }
-
-    const text = block.text.trim();
-    let parsed: GenerateResponse;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      const fenceStripped = text.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
-      parsed = JSON.parse(fenceStripped);
-    }
-
-    if (
-      typeof parsed.whyItMatters !== 'string' ||
-      !Array.isArray(parsed.questions) ||
-      !Array.isArray(parsed.flashcards)
-    ) {
-      throw new Error('Response JSON did not match expected shape');
-    }
-
-    // Persist to Supabase
-    const supabase = await createClient();
-
-    await db.updateLessonGenerated(supabase, lessonId, {
-      why_it_matters: parsed.whyItMatters,
-      generated_at: new Date().toISOString(),
-    });
-
+  // On a full restart (chunkFrom === 0), wipe any previous content
+  if (chunkFrom === 0) {
     await db.deleteFlashcardsForLesson(supabase, lessonId);
     await db.deleteQuestionsForLesson(supabase, lessonId);
+  }
 
+  let whyItMatters: string | null = null;
+
+  for (let i = chunkFrom; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    const chunkWords = chunk.split(/\s+/).length;
+    const chunkQuestions = Math.max(6, Math.round(Math.max(12, Math.min(30, Math.round(totalWords / 130))) * (chunkWords / totalWords)));
+
+    const isFirst = i === 0;
+    const systemPrompt = isFirst || !isMultiChunk
+      ? firstChunkPrompt(questionMix, isMultiChunk ? chunkQuestions : Math.max(12, Math.min(30, Math.round(totalWords / 130))))
+      : continuationChunkPrompt(questionMix, chunkQuestions);
+
+    const userMessage = isFirst
+      ? `Lesson: ${title}\n\n${chunk}`
+      : `Lesson (continued): ${title}\n\n${chunk}`;
+
+    console.log(`[generate] chunk ${i + 1}/${chunks.length} chars=${chunk.length} words=${chunkWords} targetQ=${chunkQuestions}`);
+
+    let questions: QuestionRow[];
+    let flashcards: FlashcardRow[];
+
+    try {
+      const message = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 8192,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userMessage }],
+      });
+
+      console.log(`[generate] chunk ${i + 1}/${chunks.length} tokens: input=${message.usage.input_tokens} output=${message.usage.output_tokens}`);
+
+      const block = message.content[0];
+      if (block.type !== 'text') throw new Error('Unexpected response type from model');
+
+      if (isFirst || !isMultiChunk) {
+        const parsed = parseJSON<FirstChunkResponse>(block.text);
+        if (typeof parsed.whyItMatters !== 'string' || !Array.isArray(parsed.questions) || !Array.isArray(parsed.flashcards)) {
+          throw new Error('Response JSON did not match expected shape (first chunk)');
+        }
+        whyItMatters = parsed.whyItMatters;
+        questions = parsed.questions;
+        flashcards = parsed.flashcards;
+
+        // Persist whyItMatters immediately (so we have it even if later chunks fail)
+        await supabase.from('lessons').update({ why_it_matters: whyItMatters }).eq('id', lessonId);
+      } else {
+        const parsed = parseJSON<ContinuationResponse>(block.text);
+        if (!Array.isArray(parsed.questions) || !Array.isArray(parsed.flashcards)) {
+          throw new Error('Response JSON did not match expected shape (continuation chunk)');
+        }
+        questions = parsed.questions;
+        flashcards = parsed.flashcards;
+      }
+    } catch (err) {
+      // Record which chunk failed so the next retry can resume
+      await supabase.from('lessons').update({ generation_chunk: i }).eq('id', lessonId);
+      console.error(`[generate] chunk ${i + 1}/${chunks.length} FAILED`, err);
+      const msg = err instanceof Error ? err.message : 'Generation failed';
+      return NextResponse.json({ error: msg, failedChunk: i }, { status: 500 });
+    }
+
+    // Insert this chunk's output
     await db.insertFlashcards(
       supabase,
-      parsed.flashcards.map((c) => ({
+      flashcards.map((c) => ({
         lesson_id: lessonId,
         front: c.front,
         back: c.back,
@@ -145,7 +244,7 @@ export async function POST(request: NextRequest) {
 
     await db.insertQuestions(
       supabase,
-      parsed.questions.map((q) => ({
+      questions.map((q) => ({
         lesson_id: lessonId,
         question_type: q.question_type,
         stem: q.stem,
@@ -155,11 +254,14 @@ export async function POST(request: NextRequest) {
         source_anchor: q.source_anchor ?? null,
       }))
     );
-
-    return NextResponse.json({ ok: true, whyItMatters: parsed.whyItMatters });
-  } catch (err) {
-    console.error('[generate]', err);
-    const message = err instanceof Error ? err.message : 'Generation failed';
-    return NextResponse.json({ error: message }, { status: 500 });
   }
+
+  // All chunks complete — mark lesson generated and clear chunk cursor
+  await db.updateLessonGenerated(supabase, lessonId, {
+    why_it_matters: whyItMatters ?? '',
+    generated_at: new Date().toISOString(),
+  });
+  await supabase.from('lessons').update({ generation_chunk: null }).eq('id', lessonId);
+
+  return NextResponse.json({ ok: true, chunks: chunks.length });
 }
